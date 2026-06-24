@@ -1,0 +1,14 @@
+{
+  "name": "smart-map-platform",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "init:config": "node scripts/init-config.mjs",
+    "dev": "node server.mjs",
+    "start": "node server.mjs",
+    "check": "node --check src/main.js && node --check server.mjs && node --check scripts/init-config.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
