@@ -1,0 +1,1 @@
+window.SMART_MAP_GOOGLE_MAPS_API_KEY = 'your_google_maps_api_key';
