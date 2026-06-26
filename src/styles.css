@@ -10,6 +10,7 @@ button, input, textarea { font: inherit; }
 button { border: 0; border-radius: 999px; padding: 0.75rem 1rem; background: #dff3e4; color: #14532d; font-weight: 700; cursor: pointer; }
 button:hover { filter: brightness(0.97); }
 .primary { background: #16a34a; color: white; box-shadow: 0 10px 24px rgba(22, 163, 74, 0.25); }
+.danger { background: #fee2e2; color: #b91c1c; }
 
 .hero { display: flex; justify-content: space-between; gap: 1rem; align-items: center; padding: 2rem clamp(1rem, 4vw, 3rem); background: linear-gradient(135deg, #dcfce7, #f0fdf4 55%, #ffffff); border-bottom: 1px solid #dcfce7; }
 .eyebrow { margin: 0 0 0.35rem; color: #16a34a; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
@@ -42,6 +43,7 @@ input:focus, textarea:focus { outline: 3px solid #bbf7d0; border-color: #16a34a;
 .store-card { display: grid; grid-template-columns: 1fr auto; gap: 0.8rem; align-items: center; padding: 1rem; border: 1px solid #d9f4df; border-radius: 18px; background: #fbfffc; }
 .store-card h3 { margin: 0 0 0.25rem; }
 .store-card p { margin: 0.25rem 0; color: #4d6554; }
+.store-actions { display: grid; gap: 0.5rem; }
 .category { display: inline-block; color: #15803d !important; font-weight: 800; }
 .coords { font-size: 0.85rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .empty { color: #607568; background: #f8fff9; border: 1px dashed #bbdfc4; border-radius: 16px; padding: 1rem; }
@@ -56,4 +58,5 @@ input:focus, textarea:focus { outline: 3px solid #bbf7d0; border-color: #16a34a;
 
 @media (max-width: 560px) {
   .grid-two, .button-row, .store-card { grid-template-columns: 1fr; }
+  .store-actions { grid-template-columns: 1fr 1fr; }
 }
