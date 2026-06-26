@@ -209,6 +209,7 @@ function renderMarkers() {
   storeMarkers.forEach((marker) => marker.setMap(null));
   storeMarkers = filteredStores().map((store) => {
     const marker = new google.maps.Marker({ position: { lat: store.lat, lng: store.lng }, map, title: store.name });
+    marker.storeId = store.id;
     marker.addListener('click', () => openStoreInfo(store, marker));
     return marker;
   });
@@ -231,13 +232,28 @@ function renderStoreList() {
           <p>${escapeHtml(store.description || '説明なし')}</p>
           <p class="coords">${store.lat.toFixed(6)}, ${store.lng.toFixed(6)}</p>
         </div>
-        <button data-focus-store="${store.id}">地図で見る</button>
+        <div class="store-actions">
+          <button data-focus-store="${store.id}">地図で見る</button>
+          <button class="danger" data-delete-store="${store.id}">削除</button>
+        </div>
       </article>`).join('')
     : '<p class="empty">条件に一致する店舗がありません。</p>';
 
   elements.storeList.querySelectorAll('[data-focus-store]').forEach((button) => {
     button.addEventListener('click', () => focusStore(button.dataset.focusStore));
   });
+
+  elements.storeList.querySelectorAll('[data-delete-store]').forEach((button) => {
+    button.addEventListener('click', () => deleteStore(button.dataset.deleteStore));
+  });
+}
+
+function deleteStore(id) {
+  stores = stores.filter((store) => store.id !== id);
+  saveStores();
+  infoWindow?.close();
+  renderStoreList();
+  renderMarkers();
 }
 
 function focusStore(id) {
@@ -246,7 +262,7 @@ function focusStore(id) {
   const position = { lat: store.lat, lng: store.lng };
   map.setCenter(position);
   map.setZoom(16);
-  const marker = storeMarkers.find((candidate) => candidate.getTitle() === store.name);
+  const marker = storeMarkers.find((candidate) => candidate.storeId === store.id);
   if (marker) openStoreInfo(store, marker);
 }
 

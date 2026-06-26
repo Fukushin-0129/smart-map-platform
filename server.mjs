@@ -8,33 +8,38 @@ const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
 };
+const staticRoutes = new Map([
+  ['/', 'index.html'],
+  ['/index.html', 'index.html'],
+  ['/src/main.js', 'src/main.js'],
+  ['/src/styles.css', 'src/styles.css'],
+]);
 
 createServer(async (request, response) => {
+  const url = new URL(request.url || '/', `http://${request.headers.host}`);
+
+  if (url.pathname === '/config.js') {
+    response.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' });
+    response.end(`window.SMART_MAP_GOOGLE_MAPS_API_KEY = window.SMART_MAP_GOOGLE_MAPS_API_KEY || '${escapeJavaScript(process.env.GOOGLE_MAPS_API_KEY || '')}';
+`);
+    return;
+  }
+
+  const routePath = staticRoutes.get(url.pathname);
+
+  if (!routePath) {
+    response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    response.end('Not Found');
+    return;
+  }
+
   try {
-    const url = new URL(request.url || '/', `http://${request.headers.host}`);
-    const requestedPath = url.pathname === '/' ? '/index.html' : decodeURIComponent(url.pathname);
-    const filePath = resolve(root, `.${requestedPath}`);
-
-    if (!filePath.startsWith(`${root}/`) && filePath !== root) {
-      response.writeHead(403);
-      response.end('Forbidden');
-      return;
-    }
-
+    const filePath = resolve(root, routePath);
     const body = await readFile(filePath);
     response.writeHead(200, { 'Content-Type': mimeTypes[extname(filePath)] || 'application/octet-stream' });
     response.end(body);
   } catch {
-    const url = new URL(request.url || '/', `http://${request.headers.host}`);
-
-    if (url.pathname === '/config.js') {
-      response.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' });
-      response.end(`window.SMART_MAP_GOOGLE_MAPS_API_KEY = window.SMART_MAP_GOOGLE_MAPS_API_KEY || '${escapeJavaScript(process.env.GOOGLE_MAPS_API_KEY || '')}';\n`);
-      return;
-    }
-
     response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     response.end('Not Found');
   }
