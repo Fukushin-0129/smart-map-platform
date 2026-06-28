@@ -53,6 +53,17 @@ app.innerHTML = `
       </section>
 
       <section>
+        <h2>KMLインポート</h2>
+        <div class="kml-import">
+          <label>Google My MapsのKMLファイル
+            <input id="kmlInput" type="file" accept=".kml,application/vnd.google-earth.kml+xml,application/xml,text/xml" multiple />
+          </label>
+          <p class="hint">例: 野菜メインのカフェ.kml、スーパーマーケット.kml、レストランチェーンなど.kml を選択できます。</p>
+          <p id="kmlStatus" class="import-status" aria-live="polite"></p>
+        </div>
+      </section>
+
+      <section>
         <h2>店舗検索</h2>
         <input id="searchInput" class="search" placeholder="店舗名・カテゴリ・説明で検索" />
       </section>
@@ -75,6 +86,8 @@ const elements = {
   storeForm: document.querySelector('#storeForm'),
   useCenterButton: document.querySelector('#useCenterButton'),
   searchInput: document.querySelector('#searchInput'),
+  kmlInput: document.querySelector('#kmlInput'),
+  kmlStatus: document.querySelector('#kmlStatus'),
   storeList: document.querySelector('#storeList'),
   count: document.querySelector('#count'),
   name: document.querySelector('#name'),
@@ -127,6 +140,7 @@ function bindEvents() {
     renderStoreList();
     renderMarkers();
   });
+  elements.kmlInput.addEventListener('change', importKmlFiles);
   elements.storeForm.addEventListener('submit', (event) => {
     event.preventDefault();
     const formData = new FormData(elements.storeForm);
@@ -152,6 +166,112 @@ function bindEvents() {
     renderMarkers();
     focusStore(store.id);
   });
+}
+
+
+async function importKmlFiles(event) {
+  const files = Array.from(event.target.files || []);
+  if (!files.length) return;
+
+  elements.kmlStatus.textContent = 'KMLファイルを読み込んでいます...';
+
+  const importedStores = [];
+  const errors = [];
+
+  for (const file of files) {
+    try {
+      const text = await file.text();
+      const parsedStores = parseKmlStores(text, file.name);
+      importedStores.push(...parsedStores);
+      if (!parsedStores.length) {
+        errors.push(`${file.name}: インポートできるPlacemarkが見つかりませんでした。`);
+      }
+    } catch (error) {
+      errors.push(`${file.name}: ${error.message}`);
+    }
+  }
+
+  if (importedStores.length) {
+    stores = [...importedStores, ...stores];
+    saveStores();
+    renderStoreList();
+    renderMarkers();
+    focusStore(importedStores[0].id);
+  }
+
+  elements.kmlStatus.textContent = [
+    importedStores.length ? `${importedStores.length}件の店舗を追加しました。` : '店舗は追加されませんでした。',
+    ...errors,
+  ].join(' ');
+  event.target.value = '';
+}
+
+function parseKmlStores(kmlText, fileName) {
+  const document = new DOMParser().parseFromString(kmlText, 'application/xml');
+  const parserError = document.querySelector('parsererror');
+  if (parserError) {
+    throw new Error('KMLの形式を確認してください。');
+  }
+
+  return getDescendantNodes(document, 'Placemark').map((placemark) => {
+    const coordinates = extractPlacemarkCoordinates(placemark);
+    if (!coordinates || !isValidCoordinate(coordinates.lat, coordinates.lng)) return null;
+
+    return {
+      id: crypto.randomUUID(),
+      name: getDirectNodeText(placemark, 'name') || stripFileExtension(fileName),
+      category: getPlacemarkLayerName(placemark) || stripFileExtension(fileName) || '未分類',
+      description: normalizeDescription(getDirectNodeText(placemark, 'description')),
+      lat: coordinates.lat,
+      lng: coordinates.lng,
+      createdAt: new Date().toISOString(),
+      importedFrom: fileName,
+    };
+  }).filter(Boolean);
+}
+
+function extractPlacemarkCoordinates(placemark) {
+  const coordinatesText = getDescendantNodeText(placemark, 'coordinates');
+  const firstCoordinate = coordinatesText.split(/\s+/).find(Boolean);
+  if (!firstCoordinate) return null;
+
+  const [lng, lat] = firstCoordinate.split(',').map(Number);
+  return { lat, lng };
+}
+
+function getPlacemarkLayerName(placemark) {
+  let parent = placemark.parentElement;
+  while (parent) {
+    if (parent.localName === 'Folder') {
+      return getDirectNodeText(parent, 'name');
+    }
+    parent = parent.parentElement;
+  }
+  return '';
+}
+
+function getDirectNodeText(root, tagName) {
+  const node = Array.from(root.children).find((child) => child.localName === tagName);
+  return node?.textContent?.trim() || '';
+}
+
+function getDescendantNodeText(root, tagName) {
+  const node = getDescendantNodes(root, tagName)[0];
+  return node?.textContent?.trim() || '';
+}
+
+function getDescendantNodes(root, tagName) {
+  return Array.from(root.getElementsByTagName('*')).filter((child) => child.localName === tagName);
+}
+
+function normalizeDescription(description) {
+  if (!description) return '';
+  const htmlDocument = new DOMParser().parseFromString(description, 'text/html');
+  return (htmlDocument.body.textContent || description).replace(/\s+/g, ' ').trim();
+}
+
+function stripFileExtension(fileName) {
+  return fileName.replace(/\.kml$/i, '');
 }
 
 function loadGoogleMaps() {
