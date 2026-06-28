@@ -18,7 +18,7 @@ app.innerHTML = `
       <p class="eyebrow">Smart Map Platform</p>
       <h1>サラダマップ風 店舗登録・検索アプリ</h1>
       <p class="lead">Google Maps JavaScript APIで現在地取得、店舗登録、一覧表示、検索を行えます。</p>
-      <p class="api-help">APIキーはプロジェクト直下の <code>config.js</code> に設定します。</p>
+      <p class="api-help">APIキーはローカルでは <code>config.js</code>、Vercelでは環境変数 <code>GOOGLE_MAPS_API_KEY</code> に設定します。</p>
     </div>
     <button id="locateButton" class="primary">現在地を取得</button>
   </header>
@@ -276,7 +276,7 @@ function stripFileExtension(fileName) {
 
 function loadGoogleMaps() {
   if (!GOOGLE_MAPS_API_KEY) {
-    return Promise.reject(new Error('config.jsにGoogle Maps JavaScript APIキーを設定してください。'));
+    return Promise.reject(new Error('Google Maps JavaScript APIキーを設定してください。ローカルではconfig.js、VercelではGOOGLE_MAPS_API_KEYを使います。'));
   }
   if (window.google?.maps) return Promise.resolve();
   if (googleMapsPromise) return googleMapsPromise;

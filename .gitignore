@@ -1,2 +1,5 @@
 # Local Google Maps API key. Copy config.example.js to config.js and edit it.
 config.js
+
+# Build output
+dist/
