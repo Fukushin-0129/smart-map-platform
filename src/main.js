@@ -1,12 +1,15 @@
 const GOOGLE_MAPS_API_KEY = window.SMART_MAP_GOOGLE_MAPS_API_KEY || new URLSearchParams(window.location.search).get('googleMapsApiKey') || '';
 const DEFAULT_CENTER = { lat: 35.681236, lng: 139.767125 };
 const STORAGE_KEY = 'smart-map-platform:stores';
+const LAYERS_STORAGE_KEY = 'smart-map-platform:kml-layers';
+const LAYER_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899'];
 
 let map;
 let userMarker;
 let infoWindow;
 let storeMarkers = [];
 let stores = loadStores();
+let layers = loadLayers();
 let currentPosition = null;
 let googleMapsPromise = null;
 
@@ -55,12 +58,20 @@ app.innerHTML = `
       <section>
         <h2>KMLインポート</h2>
         <div class="kml-import">
-          <label>Google My MapsのKMLファイル
+          <label>Google My MapsのKMLファイル（複数選択可）
             <input id="kmlInput" type="file" accept=".kml,application/vnd.google-earth.kml+xml,application/xml,text/xml" multiple />
           </label>
-          <p class="hint">例: 野菜メインのカフェ.kml、スーパーマーケット.kml、レストランチェーンなど.kml を選択できます。</p>
+          <p class="hint">Google My Mapsから書き出した複数のKMLを一度に選ぶと、1ファイル=1レイヤーとして追加します。</p>
           <p id="kmlStatus" class="import-status" aria-live="polite"></p>
         </div>
+      </section>
+
+      <section>
+        <div class="list-header">
+          <h2>KMLレイヤー</h2>
+          <span id="layerCount" class="badge">0件</span>
+        </div>
+        <div id="layerList" class="layer-list"></div>
       </section>
 
       <section>
@@ -88,6 +99,8 @@ const elements = {
   searchInput: document.querySelector('#searchInput'),
   kmlInput: document.querySelector('#kmlInput'),
   kmlStatus: document.querySelector('#kmlStatus'),
+  layerList: document.querySelector('#layerList'),
+  layerCount: document.querySelector('#layerCount'),
   storeList: document.querySelector('#storeList'),
   count: document.querySelector('#count'),
   name: document.querySelector('#name'),
@@ -101,6 +114,7 @@ initialize();
 
 async function initialize() {
   seedStoresIfEmpty();
+  renderLayerList();
   renderStoreList();
   bindEvents();
 
@@ -152,6 +166,9 @@ function bindEvents() {
       lat: Number(formData.get('lat')),
       lng: Number(formData.get('lng')),
       createdAt: new Date().toISOString(),
+      layerId: null,
+      layerName: '',
+      layerColor: '#16a34a',
     };
 
     if (!isValidCoordinate(store.lat, store.lng)) {
@@ -176,14 +193,18 @@ async function importKmlFiles(event) {
   elements.kmlStatus.textContent = 'KMLファイルを読み込んでいます...';
 
   const importedStores = [];
+  const importedLayers = [];
   const errors = [];
 
   for (const file of files) {
     try {
       const text = await file.text();
-      const parsedStores = parseKmlStores(text, file.name);
-      importedStores.push(...parsedStores);
-      if (!parsedStores.length) {
+      const layer = createKmlLayer(text, file.name, importedLayers.length);
+      const parsedStores = parseKmlStores(text, file.name, layer);
+      if (parsedStores.length) {
+        importedLayers.push({ ...layer, storeCount: parsedStores.length });
+        importedStores.push(...parsedStores);
+      } else {
         errors.push(`${file.name}: インポートできるPlacemarkが見つかりませんでした。`);
       }
     } catch (error) {
@@ -192,21 +213,24 @@ async function importKmlFiles(event) {
   }
 
   if (importedStores.length) {
+    layers = [...importedLayers, ...layers];
     stores = [...importedStores, ...stores];
+    saveLayers();
     saveStores();
+    renderLayerList();
     renderStoreList();
     renderMarkers();
     focusStore(importedStores[0].id);
   }
 
   elements.kmlStatus.textContent = [
-    importedStores.length ? `${importedStores.length}件の店舗を追加しました。` : '店舗は追加されませんでした。',
+    importedStores.length ? `${importedLayers.length}レイヤー、${importedStores.length}件の店舗を追加しました。` : '店舗は追加されませんでした。',
     ...errors,
   ].join(' ');
   event.target.value = '';
 }
 
-function parseKmlStores(kmlText, fileName) {
+function parseKmlStores(kmlText, fileName, layer) {
   const document = new DOMParser().parseFromString(kmlText, 'application/xml');
   const parserError = document.querySelector('parsererror');
   if (parserError) {
@@ -220,14 +244,38 @@ function parseKmlStores(kmlText, fileName) {
     return {
       id: crypto.randomUUID(),
       name: getDirectNodeText(placemark, 'name') || stripFileExtension(fileName),
-      category: getPlacemarkLayerName(placemark) || stripFileExtension(fileName) || '未分類',
+      category: getPlacemarkLayerName(placemark) || layer.name || '未分類',
       description: normalizeDescription(getDirectNodeText(placemark, 'description')),
       lat: coordinates.lat,
       lng: coordinates.lng,
       createdAt: new Date().toISOString(),
       importedFrom: fileName,
+      layerId: layer.id,
+      layerName: layer.name,
+      layerColor: layer.color,
     };
   }).filter(Boolean);
+}
+
+function createKmlLayer(kmlText, fileName, importIndex) {
+  const document = new DOMParser().parseFromString(kmlText, 'application/xml');
+  const parserError = document.querySelector('parsererror');
+  if (parserError) throw new Error('KMLの形式を確認してください。');
+
+  const documentName = getDirectNodeText(getDescendantNodes(document, 'Document')[0] || document.documentElement, 'name');
+  const id = crypto.randomUUID();
+  return {
+    id,
+    name: documentName || stripFileExtension(fileName),
+    fileName,
+    color: nextLayerColor(importIndex),
+    visible: true,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function nextLayerColor(importIndex = 0) {
+  return LAYER_COLORS[(layers.length + importIndex) % LAYER_COLORS.length];
 }
 
 function extractPlacemarkCoordinates(placemark) {
@@ -328,16 +376,58 @@ function renderMarkers() {
   if (!map || !window.google?.maps) return;
   storeMarkers.forEach((marker) => marker.setMap(null));
   storeMarkers = filteredStores().map((store) => {
-    const marker = new google.maps.Marker({ position: { lat: store.lat, lng: store.lng }, map, title: store.name });
+    const marker = new google.maps.Marker({
+      position: { lat: store.lat, lng: store.lng },
+      map,
+      title: store.name,
+      icon: markerIconForStore(store),
+    });
     marker.storeId = store.id;
     marker.addListener('click', () => openStoreInfo(store, marker));
     return marker;
   });
 }
 
+function markerIconForStore(store) {
+  const color = store.layerColor || getLayerById(store.layerId)?.color || '#16a34a';
+  return { path: google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: color, fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 2 };
+}
+
 function openStoreInfo(store, marker) {
-  infoWindow.setContent(`<strong>${escapeHtml(store.name)}</strong><br>${escapeHtml(store.category)}<br>${escapeHtml(store.description || '説明なし')}`);
+  const layerLabel = store.layerName ? `<br>レイヤー: ${escapeHtml(store.layerName)}` : '';
+  infoWindow.setContent(`<strong>${escapeHtml(store.name)}</strong><br>${escapeHtml(store.category)}${layerLabel}<br>${escapeHtml(store.description || '説明なし')}`);
   infoWindow.open({ anchor: marker, map });
+}
+
+function renderLayerList() {
+  elements.layerCount.textContent = `${layers.length}件`;
+  elements.layerList.innerHTML = layers.length
+    ? layers.map((layer) => `
+      <label class="layer-card">
+        <input type="checkbox" data-toggle-layer="${layer.id}" ${layer.visible ? 'checked' : ''} />
+        <span class="layer-color" style="--layer-color: ${escapeHtml(layer.color)}"></span>
+        <span><strong>${escapeHtml(layer.name)}</strong><small>${escapeHtml(layer.fileName)} / ${countStoresInLayer(layer.id)}件</small></span>
+      </label>`).join('')
+    : '<p class="empty">KMLを読み込むと、ここでレイヤーの表示/非表示を切り替えられます。</p>';
+
+  elements.layerList.querySelectorAll('[data-toggle-layer]').forEach((checkbox) => {
+    checkbox.addEventListener('change', () => toggleLayer(checkbox.dataset.toggleLayer, checkbox.checked));
+  });
+}
+
+function toggleLayer(layerId, visible) {
+  layers = layers.map((layer) => layer.id === layerId ? { ...layer, visible } : layer);
+  saveLayers();
+  renderStoreList();
+  renderMarkers();
+}
+
+function countStoresInLayer(layerId) {
+  return stores.filter((store) => store.layerId === layerId).length;
+}
+
+function getLayerById(layerId) {
+  return layers.find((layer) => layer.id === layerId);
 }
 
 function renderStoreList() {
@@ -349,6 +439,7 @@ function renderStoreList() {
         <div>
           <h3>${escapeHtml(store.name)}</h3>
           <p class="category">${escapeHtml(store.category)}</p>
+          ${store.layerName ? `<p class="layer-badge"><span style="--layer-color: ${escapeHtml(store.layerColor)}"></span>${escapeHtml(store.layerName)}</p>` : ''}
           <p>${escapeHtml(store.description || '説明なし')}</p>
           <p class="coords">${store.lat.toFixed(6)}, ${store.lng.toFixed(6)}</p>
         </div>
@@ -370,7 +461,10 @@ function renderStoreList() {
 
 function deleteStore(id) {
   stores = stores.filter((store) => store.id !== id);
+  layers = layers.filter((layer) => countStoresInLayer(layer.id) > 0);
   saveStores();
+  saveLayers();
+  renderLayerList();
   infoWindow?.close();
   renderStoreList();
   renderMarkers();
@@ -388,8 +482,10 @@ function focusStore(id) {
 
 function filteredStores() {
   const keyword = elements.searchInput.value.trim().toLowerCase();
-  if (!keyword) return stores;
-  return stores.filter((store) => [store.name, store.category, store.description].some((value) => value.toLowerCase().includes(keyword)));
+  const visibleLayerIds = new Set(layers.filter((layer) => layer.visible).map((layer) => layer.id));
+  const layerFilteredStores = stores.filter((store) => !store.layerId || visibleLayerIds.has(store.layerId));
+  if (!keyword) return layerFilteredStores;
+  return layerFilteredStores.filter((store) => [store.name, store.category, store.description, store.layerName].some((value) => String(value || '').toLowerCase().includes(keyword)));
 }
 
 function fillCoordinates(lat, lng) {
@@ -409,8 +505,20 @@ function loadStores() {
   }
 }
 
+function loadLayers() {
+  try {
+    return JSON.parse(localStorage.getItem(LAYERS_STORAGE_KEY)) || [];
+  } catch {
+    return [];
+  }
+}
+
 function saveStores() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(stores));
+}
+
+function saveLayers() {
+  localStorage.setItem(LAYERS_STORAGE_KEY, JSON.stringify(layers));
 }
 
 function seedStoresIfEmpty() {
