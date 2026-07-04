@@ -62,10 +62,10 @@ app.innerHTML = `
       <section>
         <h2>写真インポート</h2>
         <div class="photo-import">
-          <label>GPS付きJPEG写真（複数選択可）
-            <input id="photoInput" type="file" accept="image/jpeg,image/jpg,.jpg,.jpeg" multiple />
+          <label>写真（複数選択可）
+            <input id="photoInput" type="file" accept="image/*,.jpg,.jpeg" multiple />
           </label>
-          <p class="hint">Exif GPSから位置を読み取り、50m以内は既存店舗へ追加、50〜150mは候補表示、150m以上は新規スポットにします。GPSなし写真は未分類に保存します。</p>
+          <p class="hint">Exif GPSから位置を読み取り、50m以内は既存店舗へ追加、50〜150mは候補表示、150m以上は新規スポットにします。GPSなし写真は未分類に保存します。JPEG以外やExifを読めない写真も結果を表示します。</p>
           <p id="photoStatus" class="import-status" aria-live="polite"></p>
           <div id="photoReview" class="photo-review"></div>
         </div>
@@ -210,57 +210,87 @@ function bindEvents() {
 
 
 async function importPhotoFiles(event) {
-  const files = Array.from(event.target.files || []).filter((file) => /jpe?g$/i.test(file.name) || file.type === 'image/jpeg');
+  const files = Array.from(event.target.files || []);
   if (!files.length) return;
 
   elements.photoStatus.textContent = '写真を読み込んでいます...';
   const stats = { attached: 0, candidates: 0, created: 0, unclassified: 0, errors: [] };
+  const results = [];
 
-  for (const file of files) {
-    try {
-      const [gps, dataUrl] = await Promise.all([readExifGps(file), readFileAsDataUrl(file)]);
-      const photo = {
-        id: crypto.randomUUID(),
-        name: file.name,
-        dataUrl,
-        importedAt: new Date().toISOString(),
-        lat: gps?.lat ?? null,
-        lng: gps?.lng ?? null,
-      };
-
-      if (!gps) {
-        photoImports.unclassified = [photo, ...photoImports.unclassified];
-        stats.unclassified += 1;
-        continue;
-      }
-
-      const nearest = findNearestStore(gps.lat, gps.lng);
-      if (nearest && nearest.distance <= NEAR_STORE_METERS) {
-        stores = addPhotoToStore(stores, nearest.store.id, photo);
-        stats.attached += 1;
-      } else if (nearest && nearest.distance <= CANDIDATE_STORE_METERS) {
-        photoImports.candidates = [{ photo, storeId: nearest.store.id, storeName: nearest.store.name, distance: Math.round(nearest.distance) }, ...photoImports.candidates];
-        stats.candidates += 1;
-      } else {
-        stores = [createPhotoSpot(photo), ...stores];
-        stats.created += 1;
-      }
-    } catch (error) {
-      stats.errors.push(`${file.name}: ${error.message}`);
+  try {
+    for (const file of files) {
+      const result = await importSinglePhoto(file, stats);
+      results.push(result);
     }
-  }
 
-  saveStores();
-  savePhotoImports();
-  renderStoreList();
-  renderPhotoReview();
-  renderMarkers();
-  elements.photoStatus.textContent = [
-    `${stats.attached}枚を既存店舗に追加、${stats.candidates}枚を候補、${stats.created}件を新規スポット、${stats.unclassified}枚を未分類にしました。`,
-    ...stats.errors,
-  ].join(' ');
-  event.target.value = '';
+    saveStores();
+    savePhotoImports();
+    renderStoreList();
+    renderPhotoReview();
+    renderMarkers();
+  } finally {
+    elements.photoStatus.textContent = formatPhotoImportStatus(stats, results);
+    event.target.value = '';
+  }
 }
+
+async function importSinglePhoto(file, stats) {
+  try {
+    const dataUrl = await readFileAsDataUrl(file);
+    let gps = null;
+
+    try {
+      gps = await readExifGps(file);
+    } catch (error) {
+      if (error instanceof PhotoImportError) throw error;
+      console.error('Exif GPSの読み取りに失敗しました。GPSなしとして扱います。', { fileName: file.name, fileType: file.type, error });
+    }
+
+    const photo = {
+      id: crypto.randomUUID(),
+      name: file.name,
+      dataUrl,
+      importedAt: new Date().toISOString(),
+      lat: gps?.lat ?? null,
+      lng: gps?.lng ?? null,
+    };
+
+    if (!gps) {
+      photoImports.unclassified = [photo, ...photoImports.unclassified];
+      stats.unclassified += 1;
+      return `${file.name}: GPS情報がありません。未分類に保存しました。`;
+    }
+
+    const nearest = findNearestStore(gps.lat, gps.lng);
+    if (nearest && nearest.distance <= NEAR_STORE_METERS) {
+      stores = addPhotoToStore(stores, nearest.store.id, photo);
+      stats.attached += 1;
+      return `${file.name}: 既存店舗「${nearest.store.name}」に追加しました。`;
+    }
+    if (nearest && nearest.distance <= CANDIDATE_STORE_METERS) {
+      photoImports.candidates = [{ photo, storeId: nearest.store.id, storeName: nearest.store.name, distance: Math.round(nearest.distance) }, ...photoImports.candidates];
+      stats.candidates += 1;
+      return `${file.name}: 候補写真に追加しました（${nearest.store.name} から約${Math.round(nearest.distance)}m）。`;
+    }
+
+    stores = [createPhotoSpot(photo), ...stores];
+    stats.created += 1;
+    return `${file.name}: 新規スポットを作成しました。`;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '写真の読み込み中に不明なエラーが発生しました。';
+    console.error('写真インポートに失敗しました。', { fileName: file.name, fileType: file.type, fileSize: file.size, error });
+    stats.errors.push(`${file.name}: ${message}`);
+    return `${file.name}: エラー - ${message}`;
+  }
+}
+
+function formatPhotoImportStatus(stats, results) {
+  const summary = `${stats.attached}枚を既存店舗に追加、${stats.candidates}枚を候補、${stats.created}件を新規スポット、${stats.unclassified}枚を未分類にしました。`;
+  const errorSummary = stats.errors.length ? `エラー: ${stats.errors.length}件。` : '';
+  return [summary, errorSummary, ...results].filter(Boolean).join('\n');
+}
+
+class PhotoImportError extends Error {}
 
 function createPhotoSpot(photo) {
   return {
@@ -340,12 +370,13 @@ function resolveCandidatePhoto(photoId, action) {
 async function readExifGps(file) {
   const buffer = await file.arrayBuffer();
   const view = new DataView(buffer);
-  if (view.getUint16(0) !== 0xffd8) throw new Error('JPEG形式ではありません。');
+  if (view.byteLength < 2 || view.getUint16(0) !== 0xffd8) throw new PhotoImportError('JPEG形式ではありません。');
 
   let offset = 2;
   while (offset + 4 <= view.byteLength) {
     const marker = view.getUint16(offset);
     offset += 2;
+    if (offset + 2 > view.byteLength) break;
     const length = view.getUint16(offset);
     offset += 2;
     if (length < 2 || offset + length - 2 > view.byteLength) break;
@@ -358,12 +389,17 @@ async function readExifGps(file) {
 }
 
 function parseTiffGps(view, tiffOffset) {
-  const littleEndian = getAscii(view, tiffOffset, 2) === 'II';
+  if (tiffOffset + 8 > view.byteLength) return null;
+  const byteOrder = getAscii(view, tiffOffset, 2);
+  if (!['II', 'MM'].includes(byteOrder)) return null;
+  const littleEndian = byteOrder === 'II';
   const firstIfdOffset = getUint32(view, tiffOffset + 4, littleEndian);
+  if (tiffOffset + firstIfdOffset + 2 > view.byteLength) return null;
   const gpsIfdPointer = findIfdValue(view, tiffOffset + firstIfdOffset, 0x8825, littleEndian, tiffOffset);
   if (!gpsIfdPointer) return null;
 
   const gpsIfd = tiffOffset + gpsIfdPointer;
+  if (gpsIfd + 2 > view.byteLength) return null;
   const latRef = findIfdValue(view, gpsIfd, 0x0001, littleEndian, tiffOffset);
   const latValue = findIfdValue(view, gpsIfd, 0x0002, littleEndian, tiffOffset);
   const lngRef = findIfdValue(view, gpsIfd, 0x0003, littleEndian, tiffOffset);
@@ -376,16 +412,20 @@ function parseTiffGps(view, tiffOffset) {
 }
 
 function findIfdValue(view, ifdOffset, tag, littleEndian, tiffOffset) {
+  if (ifdOffset + 2 > view.byteLength) return null;
   const count = getUint16(view, ifdOffset, littleEndian);
   for (let i = 0; i < count; i += 1) {
     const entry = ifdOffset + 2 + i * 12;
+    if (entry + 12 > view.byteLength) return null;
     if (getUint16(view, entry, littleEndian) !== tag) continue;
     const type = getUint16(view, entry + 2, littleEndian);
     const values = getUint32(view, entry + 4, littleEndian);
     const valueOffset = values * typeByteSize(type) <= 4 ? entry + 8 : tiffOffset + getUint32(view, entry + 8, littleEndian);
-    if (type === 2) return getAscii(view, valueOffset, values).replace(/\0/g, '');
+    if (valueOffset < 0 || valueOffset > view.byteLength) return null;
+    if (type === 2) return valueOffset + values <= view.byteLength ? getAscii(view, valueOffset, values).replace(/\0/g, '') : null;
     if (type === 5) return Array.from({ length: values }, (_, index) => {
       const rationalOffset = valueOffset + index * 8;
+      if (rationalOffset + 8 > view.byteLength) return 0;
       const numerator = getUint32(view, rationalOffset, littleEndian);
       const denominator = getUint32(view, rationalOffset + 4, littleEndian);
       return denominator ? numerator / denominator : 0;

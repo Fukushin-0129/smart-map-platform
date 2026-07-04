@@ -39,7 +39,7 @@ input:focus, textarea:focus { outline: 3px solid #bbf7d0; border-color: #16a34a;
 .search { margin-bottom: 0.2rem; }
 .kml-import { display: grid; gap: 0.5rem; }
 .hint, .import-status { margin: 0; color: #607568; font-size: 0.9rem; line-height: 1.5; }
-.import-status { color: #166534; font-weight: 700; }
+.import-status { color: #166534; font-weight: 700; white-space: pre-line; }
 .list-header { display: flex; justify-content: space-between; align-items: center; }
 .badge { background: #dcfce7; border-radius: 999px; color: #166534; padding: 0.35rem 0.7rem; font-weight: 800; }
 .store-list { display: grid; gap: 0.8rem; }
