@@ -132,6 +132,7 @@ const elements = {
 initialize();
 
 async function initialize() {
+  normalizeStoredData();
   seedStoresIfEmpty();
   renderLayerList();
   renderPhotoReviewLists();
@@ -609,6 +610,7 @@ function parseKmlStores(kmlText, fileName, layer) {
       layerId: layer.id,
       layerName: layer.name,
       layerColor: layer.color,
+      photoIds: [],
     };
   }).filter(Boolean);
 }
@@ -855,6 +857,31 @@ function fillCoordinates(lat, lng) {
 
 function isValidCoordinate(lat, lng) {
   return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+}
+
+function normalizeStoredData() {
+  const normalizedStores = stores.map((store) => ({
+    ...store,
+    layerId: store.layerId ?? null,
+    layerName: store.layerName || '',
+    layerColor: store.layerColor || '#16a34a',
+    photoIds: Array.isArray(store.photoIds) ? store.photoIds : [],
+  }));
+  const validStoreIds = new Set(normalizedStores.map((store) => store.id));
+  const normalizedPhotos = photos.map((photo) => (
+    photo.storeId && !validStoreIds.has(photo.storeId)
+      ? { ...photo, status: 'unclassified', storeId: null, storeName: '' }
+      : photo
+  ));
+
+  if (JSON.stringify(normalizedStores) !== JSON.stringify(stores)) {
+    stores = normalizedStores;
+    saveStores();
+  }
+  if (JSON.stringify(normalizedPhotos) !== JSON.stringify(photos)) {
+    photos = normalizedPhotos;
+    savePhotos();
+  }
 }
 
 function loadStores() {
