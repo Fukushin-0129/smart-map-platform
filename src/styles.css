@@ -85,3 +85,16 @@ input:focus, textarea:focus { outline: 3px solid #bbf7d0; border-color: #16a34a;
   .photo-review-card { grid-template-columns: 58px 1fr; }
   .photo-review-card button { grid-column: span 2; }
 }
+
+.place-search, .candidate-list, .photo-place-group { display: grid; gap: 0.65rem; }
+.candidate-card { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 0.7rem; padding: 0.8rem; border: 1px solid #d9f4df; border-radius: 16px; background: #fbfffc; }
+.candidate-card.existing { border-color: #86efac; background: #f0fdf4; }
+.candidate-card p { margin: 0.2rem 0; color: #4d6554; }
+.candidate-card small { color: #166534; font-weight: 800; }
+.photo-place-group { padding: 0.8rem; border: 1px dashed #bbdfc4; border-radius: 18px; background: #f8fff9; }
+.photo-place-group h3 { margin: 0; font-size: 0.95rem; color: #31553b; }
+.photo-place-group > img { width: 72px; height: 72px; object-fit: cover; border-radius: 14px; border: 1px solid #d9f4df; }
+
+@media (max-width: 560px) {
+  .candidate-card { grid-template-columns: 1fr; }
+}

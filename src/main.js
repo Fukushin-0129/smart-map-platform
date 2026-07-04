@@ -16,6 +16,9 @@ let layers = loadLayers();
 let photoImports = loadPhotoImports();
 let currentPosition = null;
 let googleMapsPromise = null;
+let placesService = null;
+let keywordPlaceCandidates = [];
+let photoPlaceCandidates = [];
 
 const app = document.querySelector('#app');
 
@@ -60,12 +63,27 @@ app.innerHTML = `
       </section>
 
       <section>
-        <h2>写真インポート</h2>
+        <h2>今日行ったカフェを検索登録</h2>
+        <div class="place-search">
+          <label>店名・キーワード
+            <input id="placeSearchInput" placeholder="例: 東京駅 カフェ / 店名" />
+          </label>
+          <div class="button-row">
+            <button type="button" id="placeSearchButton" class="primary">候補を検索</button>
+            <button type="button" id="clearPlaceCandidatesButton">候補をクリア</button>
+          </div>
+          <p id="placeSearchStatus" class="import-status" aria-live="polite"></p>
+          <div id="placeCandidates" class="candidate-list"></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>写真GPSでカフェ登録</h2>
         <div class="photo-import">
           <label>写真（複数選択可）
             <input id="photoInput" type="file" accept="image/*,.jpg,.jpeg" multiple />
           </label>
-          <p class="hint">Exif GPSから位置を読み取り、50m以内は既存店舗へ追加、50〜150mは候補表示、150m以上は新規スポットにします。GPSなし写真は未分類に保存します。JPEG以外やExifを読めない写真も結果を表示します。</p>
+          <p class="hint">JPEG写真のExif GPSから位置を読み取り、近くのカフェ・飲食店候補を検索します。候補を選ぶと写真付きで店舗データに登録します。GPS情報がない写真は未分類に保存します。</p>
           <p id="photoStatus" class="import-status" aria-live="polite"></p>
           <div id="photoReview" class="photo-review"></div>
         </div>
@@ -113,6 +131,11 @@ const elements = {
   storeForm: document.querySelector('#storeForm'),
   useCenterButton: document.querySelector('#useCenterButton'),
   searchInput: document.querySelector('#searchInput'),
+  placeSearchInput: document.querySelector('#placeSearchInput'),
+  placeSearchButton: document.querySelector('#placeSearchButton'),
+  clearPlaceCandidatesButton: document.querySelector('#clearPlaceCandidatesButton'),
+  placeSearchStatus: document.querySelector('#placeSearchStatus'),
+  placeCandidates: document.querySelector('#placeCandidates'),
   photoInput: document.querySelector('#photoInput'),
   photoStatus: document.querySelector('#photoStatus'),
   photoReview: document.querySelector('#photoReview'),
@@ -152,6 +175,7 @@ async function initialize() {
       fullscreenControl: true,
     });
     infoWindow = new google.maps.InfoWindow();
+    placesService = new google.maps.places.PlacesService(map);
     map.addListener('click', (event) => fillCoordinates(event.latLng.lat(), event.latLng.lng()));
     renderMarkers();
     elements.mapSetup.hidden = true;
@@ -175,6 +199,18 @@ function bindEvents() {
     renderMarkers();
   });
   elements.photoInput.addEventListener('change', importPhotoFiles);
+  elements.placeSearchButton.addEventListener('click', searchPlacesByKeyword);
+  elements.placeSearchInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      searchPlacesByKeyword();
+    }
+  });
+  elements.clearPlaceCandidatesButton.addEventListener('click', () => {
+    keywordPlaceCandidates = [];
+    elements.placeSearchStatus.textContent = '';
+    renderPlaceCandidates();
+  });
   elements.kmlInput.addEventListener('change', importKmlFiles);
   elements.storeForm.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -227,6 +263,7 @@ async function importPhotoFiles(event) {
     savePhotoImports();
     renderStoreList();
     renderPhotoReview();
+    renderPlaceCandidates();
     renderMarkers();
   } finally {
     elements.photoStatus.textContent = formatPhotoImportStatus(stats, results);
@@ -261,21 +298,17 @@ async function importSinglePhoto(file, stats) {
       return `${file.name}: GPS情報がありません。未分類に保存しました。`;
     }
 
-    const nearest = findNearestStore(gps.lat, gps.lng);
-    if (nearest && nearest.distance <= NEAR_STORE_METERS) {
-      stores = addPhotoToStore(stores, nearest.store.id, photo);
-      stats.attached += 1;
-      return `${file.name}: 既存店舗「${nearest.store.name}」に追加しました。`;
-    }
-    if (nearest && nearest.distance <= CANDIDATE_STORE_METERS) {
-      photoImports.candidates = [{ photo, storeId: nearest.store.id, storeName: nearest.store.name, distance: Math.round(nearest.distance) }, ...photoImports.candidates];
-      stats.candidates += 1;
-      return `${file.name}: 候補写真に追加しました（${nearest.store.name} から約${Math.round(nearest.distance)}m）。`;
-    }
-
-    stores = [createPhotoSpot(photo), ...stores];
-    stats.created += 1;
-    return `${file.name}: 新規スポットを作成しました。`;
+    const existingCandidates = findNearbyStores(gps.lat, gps.lng, NEAR_STORE_METERS);
+    const placeCandidates = await searchNearbyFoodPlaces(gps.lat, gps.lng);
+    photoPlaceCandidates = [{
+      id: crypto.randomUUID(),
+      photo,
+      origin: { lat: gps.lat, lng: gps.lng },
+      existingCandidates,
+      placeCandidates,
+    }, ...photoPlaceCandidates];
+    stats.candidates += 1;
+    return `${file.name}: GPS付近の候補を表示しました。`;
   } catch (error) {
     const message = error instanceof Error ? error.message : '写真の読み込み中に不明なエラーが発生しました。';
     console.error('写真インポートに失敗しました。', { fileName: file.name, fileType: file.type, fileSize: file.size, error });
@@ -285,9 +318,209 @@ async function importSinglePhoto(file, stats) {
 }
 
 function formatPhotoImportStatus(stats, results) {
-  const summary = `${stats.attached}枚を既存店舗に追加、${stats.candidates}枚を候補、${stats.created}件を新規スポット、${stats.unclassified}枚を未分類にしました。`;
+  const summary = `${stats.attached}枚を既存店舗に追加、${stats.candidates}枚を候補表示、${stats.created}件を新規スポット、${stats.unclassified}枚を未分類にしました。`;
   const errorSummary = stats.errors.length ? `エラー: ${stats.errors.length}件。` : '';
   return [summary, errorSummary, ...results].filter(Boolean).join('\n');
+}
+
+async function searchPlacesByKeyword() {
+  const query = elements.placeSearchInput.value.trim();
+  if (!query) {
+    elements.placeSearchStatus.textContent = '店名またはキーワードを入力してください。';
+    return;
+  }
+  if (!placesService) {
+    elements.placeSearchStatus.textContent = 'Google Placesを読み込めませんでした。APIキーとPlaces APIの有効化を確認してください。';
+    return;
+  }
+
+  elements.placeSearchStatus.textContent = '候補を検索しています...';
+  keywordPlaceCandidates = [];
+  renderPlaceCandidates();
+
+  try {
+    const center = map?.getCenter();
+    const request = {
+      query,
+      fields: ['place_id', 'name', 'formatted_address', 'geometry', 'types'],
+      location: center || undefined,
+      radius: center ? 3000 : undefined,
+    };
+    const results = await textSearchPlaces(request);
+    keywordPlaceCandidates = results.map((place) => ({ id: crypto.randomUUID(), place }));
+    elements.placeSearchStatus.textContent = results.length ? `${results.length}件の候補が見つかりました。` : '候補が見つかりませんでした。キーワードを変えて再検索してください。';
+  } catch (error) {
+    elements.placeSearchStatus.textContent = error.message || '候補検索に失敗しました。';
+  } finally {
+    renderPlaceCandidates();
+  }
+}
+
+function textSearchPlaces(request) {
+  return new Promise((resolve, reject) => {
+    placesService.textSearch(request, (results, status) => {
+      if (status === google.maps.places.PlacesServiceStatus.OK) {
+        resolve((results || []).slice(0, 8));
+        return;
+      }
+      if (status === google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
+        resolve([]);
+        return;
+      }
+      reject(new Error(`Google Places検索に失敗しました（${status}）。`));
+    });
+  });
+}
+
+function searchNearbyFoodPlaces(lat, lng) {
+  if (!placesService) return Promise.resolve([]);
+  return new Promise((resolve) => {
+    placesService.nearbySearch({
+      location: new google.maps.LatLng(lat, lng),
+      radius: 120,
+      keyword: 'cafe restaurant',
+      type: 'cafe',
+    }, (results, status) => {
+      if (status === google.maps.places.PlacesServiceStatus.OK || status === google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
+        resolve((results || []).slice(0, 8));
+        return;
+      }
+      console.error('GPS付近のPlaces検索に失敗しました。', status);
+      resolve([]);
+    });
+  });
+}
+
+function renderPlaceCandidates() {
+  const keywordItems = keywordPlaceCandidates.map((item) => renderPlaceCandidateCard(item.place, 'keyword', item.id, null)).join('');
+  const photoItems = photoPlaceCandidates.map((group) => {
+    const existing = group.existingCandidates.map((candidate) => `
+      <article class="candidate-card existing">
+        <div>
+          <strong>既存店舗に追加する: ${escapeHtml(candidate.store.name)}</strong>
+          <p>${Math.round(candidate.distance)}m / ${escapeHtml(candidate.store.category)}</p>
+        </div>
+        <button data-attach-photo-place="${group.id}" data-store-id="${candidate.store.id}" class="primary">写真を追加</button>
+      </article>`).join('');
+    const places = group.placeCandidates.map((place, index) => renderPlaceCandidateCard(place, 'photo', `${group.id}:${index}`, group.id)).join('');
+    const fallback = !group.existingCandidates.length && !group.placeCandidates.length
+      ? `<article class="candidate-card"><p>近くのカフェ・飲食店候補が見つかりませんでした。</p><button data-create-photo-spot="${group.id}">写真位置で新規登録</button></article>`
+      : '';
+    return `<section class="photo-place-group">
+      <h3>${escapeHtml(group.photo.name)} の候補</h3>
+      <img src="${escapeHtml(group.photo.dataUrl)}" alt="${escapeHtml(group.photo.name)}" />
+      ${existing}${places}${fallback}
+    </section>`;
+  }).join('');
+
+  elements.placeCandidates.innerHTML = [keywordItems, photoItems].filter(Boolean).join('') || '<p class="empty">検索またはGPS付き写真の読み込みで候補が表示されます。</p>';
+  elements.placeCandidates.querySelectorAll('[data-register-place]').forEach((button) => {
+    button.addEventListener('click', () => registerPlaceCandidate(button.dataset.registerPlace, button.dataset.source, button.dataset.groupId || null));
+  });
+  elements.placeCandidates.querySelectorAll('[data-attach-photo-place]').forEach((button) => {
+    button.addEventListener('click', () => attachPhotoPlaceCandidate(button.dataset.attachPhotoPlace, button.dataset.storeId));
+  });
+  elements.placeCandidates.querySelectorAll('[data-create-photo-spot]').forEach((button) => {
+    button.addEventListener('click', () => createPhotoFallbackSpot(button.dataset.createPhotoSpot));
+  });
+}
+
+function renderPlaceCandidateCard(place, source, id, groupId) {
+  const position = normalizePlacePosition(place);
+  const nearest = position ? findNearestStore(position.lat, position.lng) : null;
+  const mode = nearest && nearest.distance <= NEAR_STORE_METERS ? `既存店舗「${nearest.store.name}」の近く（${Math.round(nearest.distance)}m）` : '新規登録候補';
+  return `
+    <article class="candidate-card">
+      <div>
+        <strong>${escapeHtml(place.name || '名称未設定')}</strong>
+        <p>${escapeHtml(place.formatted_address || place.vicinity || '住所不明')}</p>
+        <small>${escapeHtml(mode)}</small>
+      </div>
+      <button data-register-place="${escapeHtml(id)}" data-source="${source}" ${groupId ? `data-group-id="${escapeHtml(groupId)}"` : ''} class="primary">登録</button>
+    </article>`;
+}
+
+function registerPlaceCandidate(id, source, groupId) {
+  const group = groupId ? photoPlaceCandidates.find((item) => item.id === groupId) : null;
+  const place = source === 'keyword'
+    ? keywordPlaceCandidates.find((item) => item.id === id)?.place
+    : group?.placeCandidates[Number(id.split(':')[1])];
+  if (!place) return;
+  const photo = group?.photo || null;
+  const store = storeFromPlace(place, photo ? [photo] : []);
+  if (!store) {
+    elements.placeSearchStatus.textContent = '候補の位置情報を取得できないため登録できません。';
+    return;
+  }
+  stores = [store, ...stores];
+  if (source === 'keyword') keywordPlaceCandidates = keywordPlaceCandidates.filter((item) => item.id !== id);
+  if (group) photoPlaceCandidates = photoPlaceCandidates.filter((item) => item.id !== group.id);
+  saveStores();
+  renderStoreList();
+  renderPlaceCandidates();
+  renderMarkers();
+  focusStore(store.id);
+}
+
+function attachPhotoPlaceCandidate(groupId, storeId) {
+  const group = photoPlaceCandidates.find((item) => item.id === groupId);
+  if (!group) return;
+  stores = addPhotoToStore(stores, storeId, group.photo);
+  photoPlaceCandidates = photoPlaceCandidates.filter((item) => item.id !== groupId);
+  saveStores();
+  renderStoreList();
+  renderPlaceCandidates();
+  renderMarkers();
+  focusStore(storeId);
+}
+
+function createPhotoFallbackSpot(groupId) {
+  const group = photoPlaceCandidates.find((item) => item.id === groupId);
+  if (!group) return;
+  const store = createPhotoSpot(group.photo);
+  stores = [store, ...stores];
+  photoPlaceCandidates = photoPlaceCandidates.filter((item) => item.id !== groupId);
+  saveStores();
+  renderStoreList();
+  renderPlaceCandidates();
+  renderMarkers();
+  focusStore(store.id);
+}
+
+function storeFromPlace(place, photos = []) {
+  const position = normalizePlacePosition(place);
+  if (!position) return null;
+  return {
+    id: crypto.randomUUID(),
+    name: place.name || '名称未設定',
+    category: categoryFromPlace(place),
+    description: place.formatted_address || place.vicinity || '',
+    address: place.formatted_address || place.vicinity || '',
+    lat: position.lat,
+    lng: position.lng,
+    createdAt: new Date().toISOString(),
+    layerId: null,
+    layerName: '',
+    layerColor: '#16a34a',
+    googlePlaceId: place.place_id || '',
+    photos,
+  };
+}
+
+function normalizePlacePosition(place) {
+  const location = place?.geometry?.location;
+  if (!location) return null;
+  const lat = typeof location.lat === 'function' ? location.lat() : location.lat;
+  const lng = typeof location.lng === 'function' ? location.lng() : location.lng;
+  return isValidCoordinate(lat, lng) ? { lat, lng } : null;
+}
+
+function categoryFromPlace(place) {
+  const types = place.types || [];
+  if (types.includes('cafe')) return 'カフェ';
+  if (types.includes('restaurant')) return '飲食店';
+  if (types.includes('bakery')) return 'ベーカリー';
+  return types[0]?.replace(/_/g, ' ') || '未分類';
 }
 
 class PhotoImportError extends Error {}
@@ -318,6 +551,14 @@ function findNearestStore(lat, lng) {
     const distance = distanceMeters(lat, lng, store.lat, store.lng);
     return !nearest || distance < nearest.distance ? { store, distance } : nearest;
   }, null);
+}
+
+function findNearbyStores(lat, lng, maxMeters) {
+  return stores
+    .map((store) => ({ store, distance: isValidCoordinate(store.lat, store.lng) ? distanceMeters(lat, lng, store.lat, store.lng) : Infinity }))
+    .filter((candidate) => candidate.distance <= maxMeters)
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, 3);
 }
 
 function distanceMeters(lat1, lng1, lat2, lng2) {
@@ -612,7 +853,7 @@ function loadGoogleMaps() {
   googleMapsPromise = new Promise((resolve, reject) => {
     window.initSmartMap = resolve;
     const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}&callback=initSmartMap&v=weekly`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}&callback=initSmartMap&libraries=places&v=weekly`;
     script.async = true;
     script.defer = true;
     script.onerror = () => reject(new Error('Google Maps JavaScript APIの読み込みに失敗しました。APIキーとネットワークを確認してください。'));
