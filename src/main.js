@@ -34,22 +34,13 @@ app.innerHTML = `
   </header>
 
   <main class="layout">
-    <section class="panel map-panel" aria-label="地図">
-      <div id="map" class="map">
-        <div id="mapSetup" class="map-setup" hidden>
-          <h2>Google Maps APIキーを設定してください</h2>
-          <p><code>npm run init:config</code> を実行し、作成された <code>config.js</code> に取得済みのAPIキーを貼り付けてから再読み込みしてください。</p>
-        </div>
-      </div>
-      <p id="mapStatus" class="status">Google Mapsを読み込み中です。</p>
-    </section>
-
     <aside class="panel controls" aria-label="店舗管理">
       <section>
         <h2>店舗登録</h2>
         <form id="storeForm" class="form">
           <label>店舗名<input id="name" name="name" required placeholder="例: Green Salad Tokyo" /></label>
-          <label>カテゴリ<input id="category" name="category" placeholder="例: サラダ / カフェ / テイクアウト" /></label>
+          <label>登録先カテゴリ／レイヤー<select id="categoryLayer" name="categoryLayer"></select></label>
+          <label>カテゴリ補足<input id="category" name="category" placeholder="例: サラダ / カフェ / テイクアウト" /></label>
           <label>説明<textarea id="description" name="description" rows="3" placeholder="おすすめメニューや営業時間など"></textarea></label>
           <div class="grid-two">
             <label>緯度<input id="lat" name="lat" type="number" step="any" required /></label>
@@ -121,6 +112,16 @@ app.innerHTML = `
         <div id="storeList" class="store-list"></div>
       </section>
     </aside>
+
+    <section class="panel map-panel" aria-label="地図">
+      <div id="map" class="map">
+        <div id="mapSetup" class="map-setup" hidden>
+          <h2>Google Maps APIキーを設定してください</h2>
+          <p><code>npm run init:config</code> を実行し、作成された <code>config.js</code> に取得済みのAPIキーを貼り付けてから再読み込みしてください。</p>
+        </div>
+      </div>
+      <p id="mapStatus" class="status">Google Mapsを読み込み中です。</p>
+    </section>
   </main>
 `;
 
@@ -146,6 +147,7 @@ const elements = {
   storeList: document.querySelector('#storeList'),
   count: document.querySelector('#count'),
   name: document.querySelector('#name'),
+  categoryLayer: document.querySelector('#categoryLayer'),
   category: document.querySelector('#category'),
   description: document.querySelector('#description'),
   lat: document.querySelector('#lat'),
@@ -155,7 +157,7 @@ const elements = {
 initialize();
 
 async function initialize() {
-  seedStoresIfEmpty();
+  renderCategoryLayerOptions();
   renderLayerList();
   renderStoreList();
   renderPhotoReview();
@@ -178,6 +180,7 @@ async function initialize() {
     placesService = new google.maps.places.PlacesService(map);
     map.addListener('click', (event) => fillCoordinates(event.latLng.lat(), event.latLng.lng()));
     renderMarkers();
+    fitMapToVisibleData();
     elements.mapSetup.hidden = true;
     elements.mapStatus.textContent = 'Google Mapを表示しました。地図上をクリックすると登録フォームに緯度・経度を入力できます。';
   } catch (error) {
@@ -218,14 +221,11 @@ function bindEvents() {
     const store = {
       id: crypto.randomUUID(),
       name: formData.get('name').trim(),
-      category: formData.get('category').trim() || '未分類',
+      ...categoryLayerFields(formData.get('categoryLayer'), formData.get('category').trim()),
       description: formData.get('description').trim(),
       lat: Number(formData.get('lat')),
       lng: Number(formData.get('lng')),
       createdAt: new Date().toISOString(),
-      layerId: null,
-      layerName: '',
-      layerColor: '#16a34a',
       photos: [],
     };
 
@@ -239,6 +239,7 @@ function bindEvents() {
     elements.storeForm.reset();
     renderStoreList();
     renderMarkers();
+    fitMapToVisibleData();
     focusStore(store.id);
   });
 }
@@ -265,6 +266,7 @@ async function importPhotoFiles(event) {
     renderPhotoReview();
     renderPlaceCandidates();
     renderMarkers();
+    fitMapToVisibleData();
   } finally {
     elements.photoStatus.textContent = formatPhotoImportStatus(stats, results);
     event.target.value = '';
@@ -391,6 +393,37 @@ function searchNearbyFoodPlaces(lat, lng) {
   });
 }
 
+function renderCategoryLayerOptions() {
+  const options = categoryLayerOptions();
+  elements.categoryLayer.innerHTML = options.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join('');
+}
+
+function categoryLayerOptions() {
+  return [
+    { value: '', label: '未分類' },
+    ...layers.map((layer) => ({ value: `layer:${layer.id}`, label: `レイヤー: ${layer.name}` })),
+    { value: 'category:野菜メインのカフェ', label: 'カテゴリ: 野菜メインのカフェ' },
+    { value: 'category:スーパーマーケット', label: 'カテゴリ: スーパーマーケット' },
+    { value: 'category:レストランチェーン', label: 'カテゴリ: レストランチェーン' },
+    { value: 'category:カフェ', label: 'カテゴリ: カフェ' },
+    { value: 'category:飲食店', label: 'カテゴリ: 飲食店' },
+  ];
+}
+
+function renderCategoryLayerSelect(name, value = '') {
+  return `<label class="candidate-layer-select">登録先カテゴリ／レイヤー<select name="${escapeHtml(name)}">${categoryLayerOptions().map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === value ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}</select></label>`;
+}
+
+function categoryLayerFields(selectedValue, fallbackCategory = '') {
+  const selected = String(selectedValue || '');
+  if (selected.startsWith('layer:')) {
+    const layer = getLayerById(selected.slice(6));
+    if (layer) return { category: layer.name || fallbackCategory || '未分類', layerId: layer.id, layerName: layer.name, layerColor: layer.color };
+  }
+  if (selected.startsWith('category:')) return { category: selected.slice(9) || '未分類', layerId: null, layerName: '', layerColor: '#16a34a' };
+  return { category: fallbackCategory || '未分類', layerId: null, layerName: '', layerColor: '#16a34a' };
+}
+
 function renderPlaceCandidates() {
   const keywordItems = keywordPlaceCandidates.map((item) => renderPlaceCandidateCard(item.place, 'keyword', item.id, null)).join('');
   const photoItems = photoPlaceCandidates.map((group) => {
@@ -398,13 +431,13 @@ function renderPlaceCandidates() {
       <article class="candidate-card existing">
         <div>
           <strong>既存店舗に追加する: ${escapeHtml(candidate.store.name)}</strong>
-          <p>${Math.round(candidate.distance)}m / ${escapeHtml(candidate.store.category)}</p>
+          <p>${Math.round(candidate.distance)}m / ${escapeHtml(displayCategoryLayer(candidate.store))}</p>
         </div>
         <button data-attach-photo-place="${group.id}" data-store-id="${candidate.store.id}" class="primary">写真を追加</button>
       </article>`).join('');
     const places = group.placeCandidates.map((place, index) => renderPlaceCandidateCard(place, 'photo', `${group.id}:${index}`, group.id)).join('');
     const fallback = !group.existingCandidates.length && !group.placeCandidates.length
-      ? `<article class="candidate-card"><p>近くのカフェ・飲食店候補が見つかりませんでした。</p><button data-create-photo-spot="${group.id}">写真位置で新規登録</button></article>`
+      ? `<article class="candidate-card"><div><p>近くのカフェ・飲食店候補が見つかりませんでした。</p>${renderCategoryLayerSelect(`fallback-layer-${escapeHtml(group.id)}`)}</div><button data-create-photo-spot="${group.id}">写真位置で新規登録</button></article>`
       : '';
     return `<section class="photo-place-group">
       <h3>${escapeHtml(group.photo.name)} の候補</h3>
@@ -415,13 +448,13 @@ function renderPlaceCandidates() {
 
   elements.placeCandidates.innerHTML = [keywordItems, photoItems].filter(Boolean).join('') || '<p class="empty">検索またはGPS付き写真の読み込みで候補が表示されます。</p>';
   elements.placeCandidates.querySelectorAll('[data-register-place]').forEach((button) => {
-    button.addEventListener('click', () => registerPlaceCandidate(button.dataset.registerPlace, button.dataset.source, button.dataset.groupId || null));
+    button.addEventListener('click', () => registerPlaceCandidate(button.dataset.registerPlace, button.dataset.source, button.dataset.groupId || null, button.closest('.candidate-card')?.querySelector('select')?.value || ''));
   });
   elements.placeCandidates.querySelectorAll('[data-attach-photo-place]').forEach((button) => {
     button.addEventListener('click', () => attachPhotoPlaceCandidate(button.dataset.attachPhotoPlace, button.dataset.storeId));
   });
   elements.placeCandidates.querySelectorAll('[data-create-photo-spot]').forEach((button) => {
-    button.addEventListener('click', () => createPhotoFallbackSpot(button.dataset.createPhotoSpot));
+    button.addEventListener('click', () => createPhotoFallbackSpot(button.dataset.createPhotoSpot, button.closest('.candidate-card')?.querySelector('select')?.value || ''));
   });
 }
 
@@ -435,19 +468,20 @@ function renderPlaceCandidateCard(place, source, id, groupId) {
         <strong>${escapeHtml(place.name || '名称未設定')}</strong>
         <p>${escapeHtml(place.formatted_address || place.vicinity || '住所不明')}</p>
         <small>${escapeHtml(mode)}</small>
+        ${renderCategoryLayerSelect(`candidate-layer-${escapeHtml(id)}`)}
       </div>
       <button data-register-place="${escapeHtml(id)}" data-source="${source}" ${groupId ? `data-group-id="${escapeHtml(groupId)}"` : ''} class="primary">登録</button>
     </article>`;
 }
 
-function registerPlaceCandidate(id, source, groupId) {
+function registerPlaceCandidate(id, source, groupId, categoryLayerValue = '') {
   const group = groupId ? photoPlaceCandidates.find((item) => item.id === groupId) : null;
   const place = source === 'keyword'
     ? keywordPlaceCandidates.find((item) => item.id === id)?.place
     : group?.placeCandidates[Number(id.split(':')[1])];
   if (!place) return;
   const photo = group?.photo || null;
-  const store = storeFromPlace(place, photo ? [photo] : []);
+  const store = storeFromPlace(place, photo ? [photo] : [], categoryLayerValue);
   if (!store) {
     elements.placeSearchStatus.textContent = '候補の位置情報を取得できないため登録できません。';
     return;
@@ -474,10 +508,10 @@ function attachPhotoPlaceCandidate(groupId, storeId) {
   focusStore(storeId);
 }
 
-function createPhotoFallbackSpot(groupId) {
+function createPhotoFallbackSpot(groupId, categoryLayerValue = '') {
   const group = photoPlaceCandidates.find((item) => item.id === groupId);
   if (!group) return;
-  const store = createPhotoSpot(group.photo);
+  const store = createPhotoSpot(group.photo, categoryLayerValue);
   stores = [store, ...stores];
   photoPlaceCandidates = photoPlaceCandidates.filter((item) => item.id !== groupId);
   saveStores();
@@ -487,21 +521,18 @@ function createPhotoFallbackSpot(groupId) {
   focusStore(store.id);
 }
 
-function storeFromPlace(place, photos = []) {
+function storeFromPlace(place, photos = [], categoryLayerValue = '') {
   const position = normalizePlacePosition(place);
   if (!position) return null;
   return {
     id: crypto.randomUUID(),
     name: place.name || '名称未設定',
-    category: categoryFromPlace(place),
+    ...categoryLayerFields(categoryLayerValue, categoryFromPlace(place)),
     description: place.formatted_address || place.vicinity || '',
     address: place.formatted_address || place.vicinity || '',
     lat: position.lat,
     lng: position.lng,
     createdAt: new Date().toISOString(),
-    layerId: null,
-    layerName: '',
-    layerColor: '#16a34a',
     googlePlaceId: place.place_id || '',
     photos,
   };
@@ -525,18 +556,15 @@ function categoryFromPlace(place) {
 
 class PhotoImportError extends Error {}
 
-function createPhotoSpot(photo) {
+function createPhotoSpot(photo, categoryLayerValue = '') {
   return {
     id: crypto.randomUUID(),
     name: photo.name.replace(/\.(jpe?g)$/i, '') || '写真スポット',
-    category: '写真スポット',
+    ...categoryLayerFields(categoryLayerValue, '写真スポット'),
     description: 'GPS付き写真から作成したスポットです。',
     lat: photo.lat,
     lng: photo.lng,
     createdAt: new Date().toISOString(),
-    layerId: null,
-    layerName: '',
-    layerColor: '#16a34a',
     photos: [photo],
   };
 }
@@ -741,7 +769,7 @@ async function importKmlFiles(event) {
     renderLayerList();
     renderStoreList();
     renderMarkers();
-    focusStore(importedStores[0].id);
+    fitMapToVisibleData();
   }
 
   elements.kmlStatus.textContent = [
@@ -909,19 +937,41 @@ function renderMarkers() {
   });
 }
 
+function fitMapToVisibleData() {
+  if (!map || !window.google?.maps) return;
+  const bounds = new google.maps.LatLngBounds();
+  let count = 0;
+  filteredStores().forEach((store) => {
+    if (!isValidCoordinate(store.lat, store.lng)) return;
+    bounds.extend({ lat: store.lat, lng: store.lng });
+    count += 1;
+  });
+  if (!count) {
+    map.setCenter(DEFAULT_CENTER);
+    map.setZoom(13);
+    return;
+  }
+  if (count === 1) {
+    map.setCenter(bounds.getCenter());
+    map.setZoom(15);
+    return;
+  }
+  map.fitBounds(bounds, 64);
+}
+
 function markerIconForStore(store) {
   const color = store.layerColor || getLayerById(store.layerId)?.color || '#16a34a';
   return { path: google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: color, fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 2 };
 }
 
 function openStoreInfo(store, marker) {
-  const layerLabel = store.layerName ? `<br>レイヤー: ${escapeHtml(store.layerName)}` : '';
-  const photoLabel = store.photos?.length ? `<br>写真: ${store.photos.length}枚` : '';
-  infoWindow.setContent(`<strong>${escapeHtml(store.name)}</strong><br>${escapeHtml(store.category)}${layerLabel}${photoLabel}<br>${escapeHtml(store.description || '説明なし')}`);
+  const photoGrid = renderInfoWindowPhotos(store.photos);
+  infoWindow.setContent(`<div class="info-window"><strong>${escapeHtml(store.name)}</strong><br>${escapeHtml(displayCategoryLayer(store))}<br>${escapeHtml(store.description || '説明なし')}${photoGrid}</div>`);
   infoWindow.open({ anchor: marker, map });
 }
 
 function renderLayerList() {
+  renderCategoryLayerOptions();
   elements.layerCount.textContent = `${layers.length}件`;
   elements.layerList.innerHTML = layers.length
     ? layers.map((layer) => `
@@ -942,6 +992,7 @@ function toggleLayer(layerId, visible) {
   saveLayers();
   renderStoreList();
   renderMarkers();
+  fitMapToVisibleData();
 }
 
 function countStoresInLayer(layerId) {
@@ -960,7 +1011,7 @@ function renderStoreList() {
       <article class="store-card">
         <div>
           <h3>${escapeHtml(store.name)}</h3>
-          <p class="category">${escapeHtml(store.category)}</p>
+          <p class="category">${escapeHtml(displayCategoryLayer(store))}</p>
           ${store.layerName ? `<p class="layer-badge"><span style="--layer-color: ${escapeHtml(store.layerColor)}"></span>${escapeHtml(store.layerName)}</p>` : ''}
           <p>${escapeHtml(store.description || '説明なし')}</p>
           <p class="coords">${store.lat.toFixed(6)}, ${store.lng.toFixed(6)}</p>
@@ -980,6 +1031,16 @@ function renderStoreList() {
   elements.storeList.querySelectorAll('[data-delete-store]').forEach((button) => {
     button.addEventListener('click', () => deleteStore(button.dataset.deleteStore));
   });
+}
+
+function displayCategoryLayer(store) {
+  return store.layerName || store.category || '未分類';
+}
+
+function renderInfoWindowPhotos(photos = []) {
+  return photos.length
+    ? `<div class="info-photo-grid">${photos.slice(0, 6).map((photo) => `<img src="${escapeHtml(photo.dataUrl)}" alt="${escapeHtml(photo.name)}" />`).join('')}</div>`
+    : '';
 }
 
 function renderPhotoThumbnails(photos = []) {
@@ -1061,15 +1122,6 @@ function saveLayers() {
 
 function savePhotoImports() {
   localStorage.setItem(PHOTO_IMPORT_STORAGE_KEY, JSON.stringify(photoImports));
-}
-
-function seedStoresIfEmpty() {
-  if (stores.length) return;
-  stores = [
-    { id: 'sample-1', name: 'Green Bowl Marunouchi', category: 'サラダ', description: '丸の内エリアのサンプル店舗です。', lat: 35.681236, lng: 139.767125, createdAt: new Date().toISOString(), photos: [] },
-    { id: 'sample-2', name: 'Fresh Deli Ginza', category: 'デリ', description: '検索と一覧表示を試すためのサンプルです。', lat: 35.671989, lng: 139.763965, createdAt: new Date().toISOString(), photos: [] },
-  ];
-  saveStores();
 }
 
 function escapeHtml(value) {
