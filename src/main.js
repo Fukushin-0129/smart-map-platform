@@ -2,6 +2,9 @@ const GOOGLE_MAPS_API_KEY = window.SMART_MAP_GOOGLE_MAPS_API_KEY || new URLSearc
 const DEFAULT_CENTER = { lat: 35.681236, lng: 139.767125 };
 const STORAGE_KEY = 'smart-map-platform:stores';
 const LAYERS_STORAGE_KEY = 'smart-map-platform:kml-layers';
+const PHOTO_IMPORT_STORAGE_KEY = 'smart-map-platform:photo-imports';
+const NEAR_STORE_METERS = 50;
+const CANDIDATE_STORE_METERS = 150;
 const LAYER_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899'];
 
 let map;
@@ -10,6 +13,7 @@ let infoWindow;
 let storeMarkers = [];
 let stores = loadStores();
 let layers = loadLayers();
+let photoImports = loadPhotoImports();
 let currentPosition = null;
 let googleMapsPromise = null;
 
@@ -56,6 +60,18 @@ app.innerHTML = `
       </section>
 
       <section>
+        <h2>写真インポート</h2>
+        <div class="photo-import">
+          <label>GPS付きJPEG写真（複数選択可）
+            <input id="photoInput" type="file" accept="image/jpeg,image/jpg,.jpg,.jpeg" multiple />
+          </label>
+          <p class="hint">Exif GPSから位置を読み取り、50m以内は既存店舗へ追加、50〜150mは候補表示、150m以上は新規スポットにします。GPSなし写真は未分類に保存します。</p>
+          <p id="photoStatus" class="import-status" aria-live="polite"></p>
+          <div id="photoReview" class="photo-review"></div>
+        </div>
+      </section>
+
+      <section>
         <h2>KMLインポート</h2>
         <div class="kml-import">
           <label>Google My MapsのKMLファイル（複数選択可）
@@ -97,6 +113,9 @@ const elements = {
   storeForm: document.querySelector('#storeForm'),
   useCenterButton: document.querySelector('#useCenterButton'),
   searchInput: document.querySelector('#searchInput'),
+  photoInput: document.querySelector('#photoInput'),
+  photoStatus: document.querySelector('#photoStatus'),
+  photoReview: document.querySelector('#photoReview'),
   kmlInput: document.querySelector('#kmlInput'),
   kmlStatus: document.querySelector('#kmlStatus'),
   layerList: document.querySelector('#layerList'),
@@ -116,6 +135,7 @@ async function initialize() {
   seedStoresIfEmpty();
   renderLayerList();
   renderStoreList();
+  renderPhotoReview();
   bindEvents();
 
   try {
@@ -154,6 +174,7 @@ function bindEvents() {
     renderStoreList();
     renderMarkers();
   });
+  elements.photoInput.addEventListener('change', importPhotoFiles);
   elements.kmlInput.addEventListener('change', importKmlFiles);
   elements.storeForm.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -169,6 +190,7 @@ function bindEvents() {
       layerId: null,
       layerName: '',
       layerColor: '#16a34a',
+      photos: [],
     };
 
     if (!isValidCoordinate(store.lat, store.lng)) {
@@ -185,6 +207,224 @@ function bindEvents() {
   });
 }
 
+
+
+async function importPhotoFiles(event) {
+  const files = Array.from(event.target.files || []).filter((file) => /jpe?g$/i.test(file.name) || file.type === 'image/jpeg');
+  if (!files.length) return;
+
+  elements.photoStatus.textContent = '写真を読み込んでいます...';
+  const stats = { attached: 0, candidates: 0, created: 0, unclassified: 0, errors: [] };
+
+  for (const file of files) {
+    try {
+      const [gps, dataUrl] = await Promise.all([readExifGps(file), readFileAsDataUrl(file)]);
+      const photo = {
+        id: crypto.randomUUID(),
+        name: file.name,
+        dataUrl,
+        importedAt: new Date().toISOString(),
+        lat: gps?.lat ?? null,
+        lng: gps?.lng ?? null,
+      };
+
+      if (!gps) {
+        photoImports.unclassified = [photo, ...photoImports.unclassified];
+        stats.unclassified += 1;
+        continue;
+      }
+
+      const nearest = findNearestStore(gps.lat, gps.lng);
+      if (nearest && nearest.distance <= NEAR_STORE_METERS) {
+        stores = addPhotoToStore(stores, nearest.store.id, photo);
+        stats.attached += 1;
+      } else if (nearest && nearest.distance <= CANDIDATE_STORE_METERS) {
+        photoImports.candidates = [{ photo, storeId: nearest.store.id, storeName: nearest.store.name, distance: Math.round(nearest.distance) }, ...photoImports.candidates];
+        stats.candidates += 1;
+      } else {
+        stores = [createPhotoSpot(photo), ...stores];
+        stats.created += 1;
+      }
+    } catch (error) {
+      stats.errors.push(`${file.name}: ${error.message}`);
+    }
+  }
+
+  saveStores();
+  savePhotoImports();
+  renderStoreList();
+  renderPhotoReview();
+  renderMarkers();
+  elements.photoStatus.textContent = [
+    `${stats.attached}枚を既存店舗に追加、${stats.candidates}枚を候補、${stats.created}件を新規スポット、${stats.unclassified}枚を未分類にしました。`,
+    ...stats.errors,
+  ].join(' ');
+  event.target.value = '';
+}
+
+function createPhotoSpot(photo) {
+  return {
+    id: crypto.randomUUID(),
+    name: photo.name.replace(/\.(jpe?g)$/i, '') || '写真スポット',
+    category: '写真スポット',
+    description: 'GPS付き写真から作成したスポットです。',
+    lat: photo.lat,
+    lng: photo.lng,
+    createdAt: new Date().toISOString(),
+    layerId: null,
+    layerName: '',
+    layerColor: '#16a34a',
+    photos: [photo],
+  };
+}
+
+function addPhotoToStore(storeList, storeId, photo) {
+  return storeList.map((store) => store.id === storeId ? { ...store, photos: [photo, ...(store.photos || [])] } : store);
+}
+
+function findNearestStore(lat, lng) {
+  return stores.reduce((nearest, store) => {
+    if (!isValidCoordinate(store.lat, store.lng)) return nearest;
+    const distance = distanceMeters(lat, lng, store.lat, store.lng);
+    return !nearest || distance < nearest.distance ? { store, distance } : nearest;
+  }, null);
+}
+
+function distanceMeters(lat1, lng1, lat2, lng2) {
+  const earthRadius = 6371000;
+  const toRadians = (value) => value * Math.PI / 180;
+  const dLat = toRadians(lat2 - lat1);
+  const dLng = toRadians(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLng / 2) ** 2;
+  return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function renderPhotoReview() {
+  const candidateItems = photoImports.candidates.map((item) => `
+    <article class="photo-review-card">
+      <img src="${escapeHtml(item.photo.dataUrl)}" alt="${escapeHtml(item.photo.name)}" />
+      <div><strong>${escapeHtml(item.photo.name)}</strong><small>${escapeHtml(item.storeName)} から約${item.distance}m</small></div>
+      <button data-attach-candidate="${item.photo.id}">候補店舗に追加</button>
+      <button data-create-candidate="${item.photo.id}">新規スポット</button>
+    </article>`).join('');
+  const unclassifiedItems = photoImports.unclassified.map((photo) => `
+    <article class="photo-review-card">
+      <img src="${escapeHtml(photo.dataUrl)}" alt="${escapeHtml(photo.name)}" />
+      <div><strong>${escapeHtml(photo.name)}</strong><small>GPS情報なし</small></div>
+    </article>`).join('');
+
+  elements.photoReview.innerHTML = candidateItems || unclassifiedItems
+    ? `${candidateItems ? `<h3>候補写真</h3>${candidateItems}` : ''}${unclassifiedItems ? `<h3>未分類写真</h3>${unclassifiedItems}` : ''}`
+    : '';
+
+  elements.photoReview.querySelectorAll('[data-attach-candidate]').forEach((button) => button.addEventListener('click', () => resolveCandidatePhoto(button.dataset.attachCandidate, 'attach')));
+  elements.photoReview.querySelectorAll('[data-create-candidate]').forEach((button) => button.addEventListener('click', () => resolveCandidatePhoto(button.dataset.createCandidate, 'create')));
+}
+
+function resolveCandidatePhoto(photoId, action) {
+  const candidate = photoImports.candidates.find((item) => item.photo.id === photoId);
+  if (!candidate) return;
+  if (action === 'attach') {
+    stores = addPhotoToStore(stores, candidate.storeId, candidate.photo);
+  } else {
+    stores = [createPhotoSpot(candidate.photo), ...stores];
+  }
+  photoImports.candidates = photoImports.candidates.filter((item) => item.photo.id !== photoId);
+  saveStores();
+  savePhotoImports();
+  renderStoreList();
+  renderPhotoReview();
+  renderMarkers();
+}
+
+async function readExifGps(file) {
+  const buffer = await file.arrayBuffer();
+  const view = new DataView(buffer);
+  if (view.getUint16(0) !== 0xffd8) throw new Error('JPEG形式ではありません。');
+
+  let offset = 2;
+  while (offset + 4 <= view.byteLength) {
+    const marker = view.getUint16(offset);
+    offset += 2;
+    const length = view.getUint16(offset);
+    offset += 2;
+    if (length < 2 || offset + length - 2 > view.byteLength) break;
+    if (marker === 0xffe1 && length >= 8 && getAscii(view, offset, 6) === 'Exif\0\0') {
+      return parseTiffGps(view, offset + 6);
+    }
+    offset += length - 2;
+  }
+  return null;
+}
+
+function parseTiffGps(view, tiffOffset) {
+  const littleEndian = getAscii(view, tiffOffset, 2) === 'II';
+  const firstIfdOffset = getUint32(view, tiffOffset + 4, littleEndian);
+  const gpsIfdPointer = findIfdValue(view, tiffOffset + firstIfdOffset, 0x8825, littleEndian, tiffOffset);
+  if (!gpsIfdPointer) return null;
+
+  const gpsIfd = tiffOffset + gpsIfdPointer;
+  const latRef = findIfdValue(view, gpsIfd, 0x0001, littleEndian, tiffOffset);
+  const latValue = findIfdValue(view, gpsIfd, 0x0002, littleEndian, tiffOffset);
+  const lngRef = findIfdValue(view, gpsIfd, 0x0003, littleEndian, tiffOffset);
+  const lngValue = findIfdValue(view, gpsIfd, 0x0004, littleEndian, tiffOffset);
+  if (!latRef || !latValue || !lngRef || !lngValue) return null;
+
+  const lat = convertGpsCoordinate(latValue, latRef);
+  const lng = convertGpsCoordinate(lngValue, lngRef);
+  return isValidCoordinate(lat, lng) ? { lat, lng } : null;
+}
+
+function findIfdValue(view, ifdOffset, tag, littleEndian, tiffOffset) {
+  const count = getUint16(view, ifdOffset, littleEndian);
+  for (let i = 0; i < count; i += 1) {
+    const entry = ifdOffset + 2 + i * 12;
+    if (getUint16(view, entry, littleEndian) !== tag) continue;
+    const type = getUint16(view, entry + 2, littleEndian);
+    const values = getUint32(view, entry + 4, littleEndian);
+    const valueOffset = values * typeByteSize(type) <= 4 ? entry + 8 : tiffOffset + getUint32(view, entry + 8, littleEndian);
+    if (type === 2) return getAscii(view, valueOffset, values).replace(/\0/g, '');
+    if (type === 5) return Array.from({ length: values }, (_, index) => {
+      const rationalOffset = valueOffset + index * 8;
+      const numerator = getUint32(view, rationalOffset, littleEndian);
+      const denominator = getUint32(view, rationalOffset + 4, littleEndian);
+      return denominator ? numerator / denominator : 0;
+    });
+    return getUint32(view, entry + 8, littleEndian);
+  }
+  return null;
+}
+
+function convertGpsCoordinate(parts, ref) {
+  if (!Array.isArray(parts) || parts.length < 3) return NaN;
+  const value = parts[0] + parts[1] / 60 + parts[2] / 3600;
+  return ['S', 'W'].includes(ref.toUpperCase()) ? -value : value;
+}
+
+function typeByteSize(type) {
+  return { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8 }[type] || 0;
+}
+
+function getUint16(view, offset, littleEndian) {
+  return view.getUint16(offset, littleEndian);
+}
+
+function getUint32(view, offset, littleEndian) {
+  return view.getUint32(offset, littleEndian);
+}
+
+function getAscii(view, offset, length) {
+  return Array.from({ length }, (_, index) => String.fromCharCode(view.getUint8(offset + index))).join('');
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('写真の読み込みに失敗しました。'));
+    reader.readAsDataURL(file);
+  });
+}
 
 async function importKmlFiles(event) {
   const files = Array.from(event.target.files || []);
@@ -395,7 +635,8 @@ function markerIconForStore(store) {
 
 function openStoreInfo(store, marker) {
   const layerLabel = store.layerName ? `<br>レイヤー: ${escapeHtml(store.layerName)}` : '';
-  infoWindow.setContent(`<strong>${escapeHtml(store.name)}</strong><br>${escapeHtml(store.category)}${layerLabel}<br>${escapeHtml(store.description || '説明なし')}`);
+  const photoLabel = store.photos?.length ? `<br>写真: ${store.photos.length}枚` : '';
+  infoWindow.setContent(`<strong>${escapeHtml(store.name)}</strong><br>${escapeHtml(store.category)}${layerLabel}${photoLabel}<br>${escapeHtml(store.description || '説明なし')}`);
   infoWindow.open({ anchor: marker, map });
 }
 
@@ -442,6 +683,7 @@ function renderStoreList() {
           ${store.layerName ? `<p class="layer-badge"><span style="--layer-color: ${escapeHtml(store.layerColor)}"></span>${escapeHtml(store.layerName)}</p>` : ''}
           <p>${escapeHtml(store.description || '説明なし')}</p>
           <p class="coords">${store.lat.toFixed(6)}, ${store.lng.toFixed(6)}</p>
+          ${renderPhotoThumbnails(store.photos)}
         </div>
         <div class="store-actions">
           <button data-focus-store="${store.id}">地図で見る</button>
@@ -457,6 +699,12 @@ function renderStoreList() {
   elements.storeList.querySelectorAll('[data-delete-store]').forEach((button) => {
     button.addEventListener('click', () => deleteStore(button.dataset.deleteStore));
   });
+}
+
+function renderPhotoThumbnails(photos = []) {
+  return photos.length
+    ? `<div class="photo-thumbnails">${photos.slice(0, 4).map((photo) => `<img src="${escapeHtml(photo.dataUrl)}" alt="${escapeHtml(photo.name)}" title="${escapeHtml(photo.name)}" />`).join('')}${photos.length > 4 ? `<span>+${photos.length - 4}</span>` : ''}</div>`
+    : '';
 }
 
 function deleteStore(id) {
@@ -513,6 +761,15 @@ function loadLayers() {
   }
 }
 
+function loadPhotoImports() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PHOTO_IMPORT_STORAGE_KEY)) || {};
+    return { candidates: parsed.candidates || [], unclassified: parsed.unclassified || [] };
+  } catch {
+    return { candidates: [], unclassified: [] };
+  }
+}
+
 function saveStores() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(stores));
 }
@@ -521,11 +778,15 @@ function saveLayers() {
   localStorage.setItem(LAYERS_STORAGE_KEY, JSON.stringify(layers));
 }
 
+function savePhotoImports() {
+  localStorage.setItem(PHOTO_IMPORT_STORAGE_KEY, JSON.stringify(photoImports));
+}
+
 function seedStoresIfEmpty() {
   if (stores.length) return;
   stores = [
-    { id: 'sample-1', name: 'Green Bowl Marunouchi', category: 'サラダ', description: '丸の内エリアのサンプル店舗です。', lat: 35.681236, lng: 139.767125, createdAt: new Date().toISOString() },
-    { id: 'sample-2', name: 'Fresh Deli Ginza', category: 'デリ', description: '検索と一覧表示を試すためのサンプルです。', lat: 35.671989, lng: 139.763965, createdAt: new Date().toISOString() },
+    { id: 'sample-1', name: 'Green Bowl Marunouchi', category: 'サラダ', description: '丸の内エリアのサンプル店舗です。', lat: 35.681236, lng: 139.767125, createdAt: new Date().toISOString(), photos: [] },
+    { id: 'sample-2', name: 'Fresh Deli Ginza', category: 'デリ', description: '検索と一覧表示を試すためのサンプルです。', lat: 35.671989, lng: 139.763965, createdAt: new Date().toISOString(), photos: [] },
   ];
   saveStores();
 }
