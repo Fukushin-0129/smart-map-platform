@@ -102,3 +102,32 @@ input:focus, textarea:focus, select:focus { outline: 3px solid #bbf7d0; border-c
 @media (max-width: 560px) {
   .candidate-card { grid-template-columns: 1fr; }
 }
+
+.csv-import { display: grid; gap: 0.5rem; }
+.assignee-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; margin-bottom: 0.75rem; }
+.flyer-legend { display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0 0 0.8rem; }
+.flyer-legend span { border-radius: 999px; color: white; font-size: 0.78rem; font-weight: 800; padding: 0.25rem 0.55rem; }
+.flyer-legend .blue { background: #2563eb; }
+.flyer-legend .green { background: #16a34a; }
+.flyer-legend .yellow { background: #facc15; color: #713f12; }
+.flyer-legend .red { background: #dc2626; }
+.flyer-card { border-left: 8px solid var(--status-color); }
+.flyer-card .store-actions { min-width: 150px; }
+.flyer-card select { padding: 0.5rem 0.65rem; border-radius: 12px; }
+.photo-button { display: inline-flex; justify-content: center; align-items: center; border-radius: 999px; padding: 0.75rem 1rem; background: #dff3e4; color: #14532d; font-weight: 800; cursor: pointer; }
+
+@media (max-width: 560px) {
+  .assignee-grid { grid-template-columns: 1fr; }
+}
+
+.mode-switch { position: sticky; top: 0; z-index: 3; display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; padding-bottom: 0.75rem; background: rgba(255, 255, 255, 0.96); }
+.mode-switch button { border: 2px solid #bbdfc4; }
+.mode-section[hidden] { display: none !important; }
+.flyer-summary { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.55rem; margin-bottom: 0.75rem; }
+.summary-card { border-left: 8px solid var(--status-color); border-radius: 16px; background: #fbfffc; border-top: 1px solid #d9f4df; border-right: 1px solid #d9f4df; border-bottom: 1px solid #d9f4df; padding: 0.75rem; }
+.summary-card strong { display: block; font-size: 1.35rem; color: #17301f; }
+.summary-card span { color: #4d6554; font-weight: 800; }
+
+@media (max-width: 560px) {
+  .mode-switch, .flyer-summary { grid-template-columns: 1fr; }
+}
