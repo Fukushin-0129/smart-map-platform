@@ -7,7 +7,7 @@
     "dev": "node server.mjs",
     "start": "node server.mjs",
     "build": "node scripts/build.mjs",
-    "check": "node --check src/main.js && node --check server.mjs && node --check scripts/init-config.mjs && node --check scripts/build.mjs && npm run build",
+    "check": "node --check src/main.js && node --check src/modules/*.js && node --check server.mjs && node --check scripts/init-config.mjs && node --check scripts/build.mjs && npm run build",
     "init:config": "node scripts/init-config.mjs"
   },
   "dependencies": {},
