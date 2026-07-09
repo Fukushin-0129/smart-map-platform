@@ -106,7 +106,7 @@ app.innerHTML = `
           <label>配布済み一覧-表1.csv
             <input id="csvInput" type="file" accept=".csv,text/csv" />
           </label>
-          <p class="hint">物件名、住所、エリア、種別、小学校区、戸数、戸数状態、配布日、次回配布、備考、緯度、経度を読み込みます。</p>
+          <p class="hint">物件名、住所、エリア、種別、小学校区、戸数、戸数状態、配布日、次回配布、備考、担当者、配布状況、緯度、経度を読み込みます。</p>
           <p id="csvStatus" class="import-status" aria-live="polite"></p>
         </div>
       </section>
@@ -147,6 +147,7 @@ app.innerHTML = `
           <h2>チラシ配布一覧</h2>
           <span id="flyerCount" class="badge">0件</span>
         </div>
+        <div id="flyerStatusSummary" class="flyer-status-summary" aria-live="polite"></div>
         <div class="flyer-legend"><span class="blue">未配布</span><span class="green">配布済み</span><span class="yellow">要現地確認</span><span class="red">配布対象外</span></div>
         <div id="flyerList" class="store-list"></div>
       </section>
@@ -191,6 +192,7 @@ const elements = {
   count: document.querySelector('#count'),
   flyerList: document.querySelector('#flyerList'),
   flyerCount: document.querySelector('#flyerCount'),
+  flyerStatusSummary: document.querySelector('#flyerStatusSummary'),
   name: document.querySelector('#name'),
   categoryLayer: document.querySelector('#categoryLayer'),
   category: document.querySelector('#category'),
@@ -1153,8 +1155,9 @@ function isValidCoordinate(lat, lng) {
 }
 
 function renderAssignees() {
+  const selected = elements.assigneeFilter.value;
   elements.assigneeInputs.forEach((input, index) => { input.value = flyerAssignees[index] || ''; });
-  elements.assigneeFilter.innerHTML = '<option value="">すべて</option>' + flyerAssignees.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+  elements.assigneeFilter.innerHTML = '<option value="">すべて</option>' + flyerAssignees.map((name) => `<option value="${escapeHtml(name)}" ${name === selected ? 'selected' : ''}>${escapeHtml(name)}</option>`).join('');
 }
 
 function updateAssignee(index, value) {
@@ -1213,21 +1216,28 @@ function rowsToFlyerApartments(rows) {
     const lng = splitCoord ? splitCoord[1] : Number(get('経度'));
     if (!isValidCoordinate(lat, lng)) return null;
     const distributionDate = get('配布日');
-    const status = normalizeFlyerStatus(get('戸数状態'), distributionDate);
+    const status = normalizeFlyerStatus(get('配布状況') || get('ステータス') || get('戸数状態'), distributionDate);
+    const assignee = normalizeFlyerAssignee(get('担当者') || get('担当'));
     return {
       id: crypto.randomUUID(), layerId: FLYER_LAYER.id, layerName: FLYER_LAYER.name, name: get('物件名') || '名称未設定',
       address: get('住所'), area: get('エリア'), type: get('種別'), schoolDistrict: get('小学校区'), units: get('戸数'), unitStatus: get('戸数状態'),
-      distributionDate, nextDistribution: get('次回配布'), memo: get('備考'), lat, lng, status, assignee: '', photos: [], createdAt: new Date().toISOString(),
+      distributionDate, nextDistribution: get('次回配布'), memo: get('備考'), lat, lng, status, assignee, photos: [], createdAt: new Date().toISOString(),
     };
   }).filter(Boolean);
 }
 
 function normalizeFlyerStatus(unitStatus, distributionDate) {
   const text = `${unitStatus} ${distributionDate}`;
+  if (FLYER_STATUSES.includes(unitStatus)) return unitStatus;
   if (/対象外/.test(text)) return '配布対象外';
   if (/確認|要/.test(text)) return '要現地確認';
-  if (distributionDate || /済/.test(text)) return '配布済み';
+  if (distributionDate || /済|完了/.test(text)) return '配布済み';
   return '未配布';
+}
+
+function normalizeFlyerAssignee(name) {
+  const trimmed = String(name || '').trim();
+  return flyerAssignees.includes(trimmed) ? trimmed : '';
 }
 
 function filteredFlyerApartments() {
@@ -1239,6 +1249,7 @@ function filteredFlyerApartments() {
 function renderFlyerList() {
   const items = filteredFlyerApartments();
   elements.flyerCount.textContent = `${items.length}件`;
+  renderFlyerStatusSummary(items);
   elements.flyerList.innerHTML = items.length ? items.map((apt) => `
     <article class="store-card flyer-card" style="--status-color:${escapeHtml(FLYER_STATUS_COLORS[apt.status] || FLYER_STATUS_COLORS['未配布'])}">
       <div>
@@ -1263,6 +1274,13 @@ function renderFlyerList() {
   elements.flyerList.querySelectorAll('[data-flyer-status]').forEach((select) => select.addEventListener('change', () => updateFlyer(select.dataset.flyerStatus, { status: select.value })));
   elements.flyerList.querySelectorAll('[data-flyer-assignee]').forEach((select) => select.addEventListener('change', () => updateFlyer(select.dataset.flyerAssignee, { assignee: select.value })));
   elements.flyerList.querySelectorAll('[data-flyer-photo]').forEach((input) => input.addEventListener('change', () => addFlyerPhoto(input.dataset.flyerPhoto, input.files?.[0])));
+}
+
+function renderFlyerStatusSummary(items) {
+  const counts = FLYER_STATUSES.reduce((result, status) => ({ ...result, [status]: 0 }), {});
+  items.forEach((apt) => { counts[apt.status] = (counts[apt.status] || 0) + 1; });
+  elements.flyerStatusSummary.innerHTML = FLYER_STATUSES.map((status) => `
+    <span style="--status-color:${escapeHtml(FLYER_STATUS_COLORS[status])}"><strong>${escapeHtml(status)}</strong>${counts[status] || 0}件</span>`).join('');
 }
 
 function updateFlyer(id, patch) { flyerApartments = flyerApartments.map((apt) => apt.id === id ? { ...apt, ...patch } : apt); saveFlyerApartments(); renderFlyerList(); renderMarkers(); }
