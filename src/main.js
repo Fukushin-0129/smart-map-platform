@@ -152,6 +152,7 @@ app.innerHTML = `
         <h2>配布状況</h2>
         <div id="flyerSummary" class="flyer-summary"></div>
         <div class="flyer-legend"><span class="blue">未配布</span><span class="green">配布済み</span><span class="yellow">要現地確認</span><span class="red">配布対象外</span></div>
+        <label>配布状況で絞り込み<select id="flyerStatusFilter"><option value="">すべて</option></select></label>
       </section>
 
       <section class="mode-section" data-mode="flyer" hidden>
@@ -196,6 +197,7 @@ const elements = {
   useCenterButton: document.querySelector('#useCenterButton'),
   searchInput: document.querySelector('#searchInput'),
   flyerSearchInput: document.querySelector('#flyerSearchInput'),
+  flyerStatusFilter: document.querySelector('#flyerStatusFilter'),
   placeSearchInput: document.querySelector('#placeSearchInput'),
   placeSearchButton: document.querySelector('#placeSearchButton'),
   clearPlaceCandidatesButton: document.querySelector('#clearPlaceCandidatesButton'),
@@ -231,6 +233,7 @@ async function initialize() {
   renderCategoryLayerOptions();
   renderLayerList();
   renderAssignees();
+  renderFlyerStatusFilter();
   renderStoreList();
   renderFlyerList();
   renderPhotoReview();
@@ -281,6 +284,7 @@ function bindEvents() {
     renderFlyerList();
     renderMarkers();
   });
+  elements.flyerStatusFilter.addEventListener('change', () => { renderFlyerList(); renderMarkers(); fitMapToVisibleData(); });
   elements.photoInput.addEventListener('change', importPhotoFiles);
   elements.placeSearchButton.addEventListener('click', searchPlacesByKeyword);
   elements.placeSearchInput.addEventListener('keydown', (event) => {
@@ -1193,6 +1197,7 @@ function switchMode(mode) {
 }
 
 function applyMode() {
+  document.body.dataset.mode = activeMode;
   elements.modeSections.forEach((section) => { section.hidden = section.dataset.mode !== activeMode; });
   elements.storeModeButton.classList.toggle('primary', activeMode === 'store');
   elements.flyerModeButton.classList.toggle('primary', activeMode === 'flyer');
@@ -1203,6 +1208,10 @@ function applyMode() {
 function renderAssignees() {
   elements.assigneeInputs.forEach((input, index) => { input.value = flyerAssignees[index] || ''; });
   elements.assigneeFilter.innerHTML = '<option value="">すべて</option>' + flyerAssignees.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+}
+
+function renderFlyerStatusFilter() {
+  elements.flyerStatusFilter.innerHTML = '<option value="">すべて</option>' + FLYER_STATUSES.map((status) => `<option value="${escapeHtml(status)}">${escapeHtml(status)}</option>`).join('');
 }
 
 function updateAssignee(index, value) {
@@ -1281,7 +1290,8 @@ function normalizeFlyerStatus(unitStatus, distributionDate) {
 function filteredFlyerApartments() {
   const keyword = (elements.flyerSearchInput?.value || '').trim().toLowerCase();
   const assignee = elements.assigneeFilter.value;
-  return flyerApartments.filter((apt) => (!assignee || apt.assignee === assignee) && (!keyword || [apt.name, apt.address, apt.area, apt.type, apt.schoolDistrict, apt.memo, apt.status, apt.assignee].some((v) => String(v || '').toLowerCase().includes(keyword))));
+  const status = elements.flyerStatusFilter.value;
+  return flyerApartments.filter((apt) => (!assignee || apt.assignee === assignee) && (!status || apt.status === status) && (!keyword || [apt.name, apt.address, apt.area, apt.type, apt.schoolDistrict, apt.memo, apt.status, apt.assignee].some((v) => String(v || '').toLowerCase().includes(keyword))));
 }
 
 function renderFlyerList() {
