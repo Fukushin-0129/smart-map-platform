@@ -119,3 +119,6 @@ input:focus, textarea:focus, select:focus { outline: 3px solid #bbf7d0; border-c
 @media (max-width: 560px) {
   .assignee-grid { grid-template-columns: 1fr; }
 }
+.flyer-status-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; margin-bottom: 0.75rem; }
+.flyer-status-summary span { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; border: 1px solid #d9f4df; border-left: 6px solid var(--status-color); border-radius: 14px; background: #fbfffc; padding: 0.65rem 0.75rem; color: #31553b; font-weight: 800; }
+.flyer-status-summary strong { color: #17301f; }
