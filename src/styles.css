@@ -132,3 +132,19 @@ input:focus, textarea:focus, select:focus { outline: 3px solid #bbf7d0; border-c
   .flyer-card select, .flyer-card button, .flyer-card .photo-button { width: 100%; padding: 0.9rem 1rem; }
   .flyer-status-summary { grid-template-columns: 1fr; }
 }
+
+
+.flyer-route-button { width: 100%; margin: 0.25rem 0 0.75rem; min-height: 54px; font-size: 1rem; }
+.flyer-route-list { display: grid; gap: 0.75rem; margin-bottom: 0.9rem; }
+.flyer-route-card { border: 1px solid #d9f4df; border-left: 8px solid var(--route-color); border-radius: 18px; background: #fbfffc; padding: 0.85rem; }
+.flyer-route-card h3 { margin: 0 0 0.55rem; color: #17301f; }
+.flyer-route-card ol { margin: 0; padding-left: 1.35rem; display: grid; gap: 0.45rem; }
+.flyer-route-card li button { display: inline; padding: 0; border-radius: 0; background: transparent; color: #14532d; font-weight: 800; text-align: left; }
+.flyer-route-card li small { display: block; color: #607568; margin-top: 0.1rem; }
+.flyer-card-status-buttons { grid-template-columns: 1fr; }
+.flyer-card-status-buttons button { min-height: 52px; font-size: 1rem; }
+
+@media (max-width: 560px) {
+  .flyer-status-buttons { grid-template-columns: 1fr; }
+  .flyer-status-buttons button, .flyer-route-button { min-height: 56px; font-size: 1.05rem; }
+}
