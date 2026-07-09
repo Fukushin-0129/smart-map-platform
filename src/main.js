@@ -7,10 +7,11 @@ const PHOTO_IMPORT_STORAGE_KEY = 'smart-map-platform:photo-imports';
 const NEAR_STORE_METERS = 50;
 const CANDIDATE_STORE_METERS = 150;
 const FLYER_LAYER = { id: 'flyer-apartments', name: 'チラシ配布マンション', color: '#2563eb', visible: true };
-const FLYER_STATUSES = ['未配布', '配布済み', '要現地確認', '配布対象外'];
-const FLYER_STATUS_COLORS = { '未配布': '#2563eb', '配布済み': '#16a34a', '要現地確認': '#facc15', '配布対象外': '#dc2626' };
+const FLYER_STATUSES = ['未配布', '配布済み', '配布不可', '不在'];
+const FLYER_STATUS_COLORS = { '未配布': '#2563eb', '配布済み': '#16a34a', '配布不可': '#dc2626', '不在': '#facc15' };
 const ASSIGNEES_STORAGE_KEY = 'smart-map-platform:flyer-assignees';
-const DEFAULT_ASSIGNEES = ['福山', '担当２', '担当３'];
+const DEFAULT_ASSIGNEES = ['福山', '担当2', '担当3', '担当4', '担当5', '担当6', '担当7', '担当8', '担当9', '担当10'];
+const MAX_FLYER_ASSIGNEES = 10;
 const LAYER_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899'];
 
 let map;
@@ -106,18 +107,14 @@ app.innerHTML = `
           <label>配布済み一覧-表1.csv
             <input id="csvInput" type="file" accept=".csv,text/csv" />
           </label>
-          <p class="hint">物件名、住所、エリア、種別、小学校区、戸数、戸数状態、配布日、次回配布、備考、緯度、経度を読み込みます。</p>
+          <p class="hint">物件名、住所、エリア、種別、小学校区、戸数、戸数状態、配布日、次回配布、備考、担当者、配布状況、緯度、経度を読み込みます。</p>
           <p id="csvStatus" class="import-status" aria-live="polite"></p>
         </div>
       </section>
 
       <section>
         <h2>担当者</h2>
-        <div class="assignee-grid">
-          <input id="assignee1" />
-          <input id="assignee2" />
-          <input id="assignee3" />
-        </div>
+        <div id="assigneeInputs" class="assignee-grid"></div>
         <label>担当者で絞り込み<select id="assigneeFilter"></select></label>
       </section>
 
@@ -147,7 +144,7 @@ app.innerHTML = `
           <h2>チラシ配布一覧</h2>
           <span id="flyerCount" class="badge">0件</span>
         </div>
-        <div class="flyer-legend"><span class="blue">未配布</span><span class="green">配布済み</span><span class="yellow">要現地確認</span><span class="red">配布対象外</span></div>
+        <div class="flyer-legend"><span class="blue">未配布</span><span class="green">配布済み</span><span class="red">配布不可</span><span class="yellow">不在</span></div>
         <div id="flyerList" class="store-list"></div>
       </section>
     </aside>
@@ -182,7 +179,7 @@ const elements = {
   csvInput: document.querySelector('#csvInput'),
   csvStatus: document.querySelector('#csvStatus'),
   assigneeFilter: document.querySelector('#assigneeFilter'),
-  assigneeInputs: [document.querySelector('#assignee1'), document.querySelector('#assignee2'), document.querySelector('#assignee3')],
+  assigneeInputs: document.querySelector('#assigneeInputs'),
   kmlInput: document.querySelector('#kmlInput'),
   kmlStatus: document.querySelector('#kmlStatus'),
   layerList: document.querySelector('#layerList'),
@@ -263,7 +260,6 @@ function bindEvents() {
   });
   elements.csvInput.addEventListener('change', importCsvFile);
   elements.assigneeFilter.addEventListener('change', () => { renderFlyerList(); renderMarkers(); fitMapToVisibleData(); });
-  elements.assigneeInputs.forEach((input, index) => input.addEventListener('change', () => updateAssignee(index, input.value)));
   elements.kmlInput.addEventListener('change', importKmlFiles);
   elements.storeForm.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -1153,9 +1149,15 @@ function isValidCoordinate(lat, lng) {
 }
 
 function renderAssignees() {
-  elements.assigneeInputs.forEach((input, index) => { input.value = flyerAssignees[index] || ''; });
-  elements.assigneeFilter.innerHTML = '<option value="">すべて</option>' + flyerAssignees.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+  const selected = elements.assigneeFilter.value;
+  elements.assigneeInputs.innerHTML = flyerAssignees.map((name, index) => `
+    <input id="assignee${index + 1}" aria-label="担当者${index + 1}" value="${escapeHtml(name)}" data-assignee-index="${index}" />`).join('');
+  elements.assigneeInputs.querySelectorAll('[data-assignee-index]').forEach((input) => {
+    input.addEventListener('change', () => updateAssignee(Number(input.dataset.assigneeIndex), input.value));
+  });
+  elements.assigneeFilter.innerHTML = '<option value="">すべて</option>' + flyerAssignees.map((name) => `<option value="${escapeHtml(name)}" ${name === selected ? 'selected' : ''}>${escapeHtml(name)}</option>`).join('');
 }
+
 
 function updateAssignee(index, value) {
   flyerAssignees[index] = value.trim() || DEFAULT_ASSIGNEES[index];
@@ -1213,21 +1215,28 @@ function rowsToFlyerApartments(rows) {
     const lng = splitCoord ? splitCoord[1] : Number(get('経度'));
     if (!isValidCoordinate(lat, lng)) return null;
     const distributionDate = get('配布日');
-    const status = normalizeFlyerStatus(get('戸数状態'), distributionDate);
+    const status = normalizeFlyerStatus(get('配布状況') || get('ステータス') || get('戸数状態'), distributionDate);
+    const assignee = normalizeFlyerAssignee(get('担当者') || get('担当'));
     return {
       id: crypto.randomUUID(), layerId: FLYER_LAYER.id, layerName: FLYER_LAYER.name, name: get('物件名') || '名称未設定',
       address: get('住所'), area: get('エリア'), type: get('種別'), schoolDistrict: get('小学校区'), units: get('戸数'), unitStatus: get('戸数状態'),
-      distributionDate, nextDistribution: get('次回配布'), memo: get('備考'), lat, lng, status, assignee: '', photos: [], createdAt: new Date().toISOString(),
+      distributionDate, nextDistribution: get('次回配布'), memo: get('備考'), lat, lng, status, assignee, photos: [], createdAt: new Date().toISOString(),
     };
   }).filter(Boolean);
 }
 
 function normalizeFlyerStatus(unitStatus, distributionDate) {
   const text = `${unitStatus} ${distributionDate}`;
-  if (/対象外/.test(text)) return '配布対象外';
-  if (/確認|要/.test(text)) return '要現地確認';
-  if (distributionDate || /済/.test(text)) return '配布済み';
+  if (FLYER_STATUSES.includes(unitStatus)) return unitStatus;
+  if (/不在|留守/.test(text)) return '不在';
+  if (/不可|対象外/.test(text)) return '配布不可';
+  if (distributionDate || /済|完了/.test(text)) return '配布済み';
   return '未配布';
+}
+
+function normalizeFlyerAssignee(name) {
+  const trimmed = String(name || '').trim();
+  return flyerAssignees.includes(trimmed) ? trimmed : '';
 }
 
 function filteredFlyerApartments() {
@@ -1243,7 +1252,7 @@ function renderFlyerList() {
     <article class="store-card flyer-card" style="--status-color:${escapeHtml(FLYER_STATUS_COLORS[apt.status] || FLYER_STATUS_COLORS['未配布'])}">
       <div>
         <h3>${escapeHtml(apt.name)}</h3>
-        <p class="category">${escapeHtml(FLYER_LAYER.name)} / ${escapeHtml(apt.status)}</p>
+        <p class="category">${escapeHtml(FLYER_LAYER.name)} <span class="flyer-status-badge" style="--status-color:${escapeHtml(FLYER_STATUS_COLORS[apt.status] || FLYER_STATUS_COLORS['未配布'])}">${escapeHtml(apt.status)}</span></p>
         <p>${escapeHtml(apt.address || '住所なし')}</p>
         <p>${escapeHtml([apt.area, apt.type, apt.schoolDistrict, apt.units ? `${apt.units}戸` : ''].filter(Boolean).join(' / '))}</p>
         <p>配布日: ${escapeHtml(apt.distributionDate || '未設定')} / 担当: ${escapeHtml(apt.assignee || '未設定')}</p>
@@ -1271,8 +1280,23 @@ async function addFlyerPhoto(id, file) { if (!file) return; const photo = { id: 
 function markerIconForFlyer(apt) { return { path: google.maps.SymbolPath.CIRCLE, scale: 9, fillColor: FLYER_STATUS_COLORS[apt.status] || FLYER_STATUS_COLORS['未配布'], fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 2 }; }
 function openFlyerInfo(apt, marker) { infoWindow.setContent(`<div class="info-window"><strong>${escapeHtml(apt.name)}</strong><br>${escapeHtml(FLYER_LAYER.name)}<br>${escapeHtml(apt.status)} / ${escapeHtml(apt.assignee || '担当者未設定')}<br>${escapeHtml(apt.address || '')}${renderInfoWindowPhotos(apt.photos)}</div>`); infoWindow.open({ anchor: marker, map }); }
 function focusFlyer(id) { const apt = flyerApartments.find((item) => item.id === id); if (!apt || !map) return; map.setCenter({ lat: apt.lat, lng: apt.lng }); map.setZoom(16); const marker = flyerMarkers.find((item) => item.flyerId === id); if (marker) openFlyerInfo(apt, marker); }
-function loadFlyerApartments() { try { return JSON.parse(localStorage.getItem(FLYER_STORAGE_KEY)) || []; } catch { return []; } }
-function loadFlyerAssignees() { try { const parsed = JSON.parse(localStorage.getItem(ASSIGNEES_STORAGE_KEY)); return Array.isArray(parsed) && parsed.length === 3 ? parsed : DEFAULT_ASSIGNEES; } catch { return DEFAULT_ASSIGNEES; } }
+function loadFlyerApartments() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(FLYER_STORAGE_KEY)) || [];
+    return parsed.map((apt) => ({ ...apt, status: normalizeFlyerStatus(apt.status || apt.unitStatus, apt.distributionDate) }));
+  } catch {
+    return [];
+  }
+}
+function loadFlyerAssignees() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ASSIGNEES_STORAGE_KEY));
+    const names = Array.isArray(parsed) ? parsed.slice(0, MAX_FLYER_ASSIGNEES).map((name) => String(name || '').trim()).filter(Boolean) : [];
+    return [...names, ...DEFAULT_ASSIGNEES].slice(0, MAX_FLYER_ASSIGNEES);
+  } catch {
+    return DEFAULT_ASSIGNEES;
+  }
+}
 function saveFlyerApartments() { localStorage.setItem(FLYER_STORAGE_KEY, JSON.stringify(flyerApartments)); }
 function saveFlyerAssignees() { localStorage.setItem(ASSIGNEES_STORAGE_KEY, JSON.stringify(flyerAssignees)); }
 

@@ -104,13 +104,14 @@ input:focus, textarea:focus, select:focus { outline: 3px solid #bbf7d0; border-c
 }
 
 .csv-import { display: grid; gap: 0.5rem; }
-.assignee-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; margin-bottom: 0.75rem; }
+.assignee-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; margin-bottom: 0.75rem; }
 .flyer-legend { display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0 0 0.8rem; }
 .flyer-legend span { border-radius: 999px; color: white; font-size: 0.78rem; font-weight: 800; padding: 0.25rem 0.55rem; }
 .flyer-legend .blue { background: #2563eb; }
 .flyer-legend .green { background: #16a34a; }
 .flyer-legend .yellow { background: #facc15; color: #713f12; }
 .flyer-legend .red { background: #dc2626; }
+.flyer-status-badge { display: inline-block; margin-left: 0.35rem; border-radius: 999px; background: var(--status-color); color: white; padding: 0.15rem 0.55rem; font-size: 0.78rem; font-weight: 800; }
 .flyer-card { border-left: 8px solid var(--status-color); }
 .flyer-card .store-actions { min-width: 150px; }
 .flyer-card select { padding: 0.5rem 0.65rem; border-radius: 12px; }
