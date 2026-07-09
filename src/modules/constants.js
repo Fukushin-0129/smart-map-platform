@@ -1,0 +1,14 @@
+export const GOOGLE_MAPS_API_KEY = window.SMART_MAP_GOOGLE_MAPS_API_KEY || new URLSearchParams(window.location.search).get('googleMapsApiKey') || '';
+export const DEFAULT_CENTER = { lat: 35.681236, lng: 139.767125 };
+export const STORAGE_KEY = 'smart-map-platform:stores';
+export const FLYER_STORAGE_KEY = 'smart-map-platform:flyer-apartments';
+export const LAYERS_STORAGE_KEY = 'smart-map-platform:kml-layers';
+export const PHOTO_IMPORT_STORAGE_KEY = 'smart-map-platform:photo-imports';
+export const NEAR_STORE_METERS = 50;
+export const CANDIDATE_STORE_METERS = 150;
+export const FLYER_LAYER = { id: 'flyer-apartments', name: 'チラシ配布マンション', color: '#2563eb', visible: true };
+export const FLYER_STATUSES = ['未配布', '配布済み', '要現地確認', '配布対象外'];
+export const FLYER_STATUS_COLORS = { '未配布': '#2563eb', '配布済み': '#16a34a', '要現地確認': '#facc15', '配布対象外': '#dc2626' };
+export const ASSIGNEES_STORAGE_KEY = 'smart-map-platform:flyer-assignees';
+export const DEFAULT_ASSIGNEES = ['福山', '担当２', '担当３'];
+export const LAYER_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899'];

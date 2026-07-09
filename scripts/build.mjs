@@ -1,8 +1,9 @@
-import { mkdir, rm, writeFile, copyFile } from 'node:fs/promises';
+import { cp, mkdir, rm, writeFile, copyFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 const distDir = 'dist';
 const filesToCopy = ['index.html', 'src/main.js', 'src/styles.css'];
+const directoriesToCopy = ['src/modules'];
 const googleMapsApiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.VITE_GOOGLE_MAPS_API_KEY || '';
 
 await rm(distDir, { recursive: true, force: true });
@@ -13,6 +14,10 @@ for (const file of filesToCopy) {
   await copyFile(file, destination);
 }
 
+
+for (const directory of directoriesToCopy) {
+  await cp(directory, join(distDir, directory), { recursive: true });
+}
 
 await writeFile(
   join(distDir, 'config.js'),
