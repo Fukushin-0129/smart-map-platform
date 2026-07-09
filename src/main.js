@@ -1,17 +1,26 @@
 const GOOGLE_MAPS_API_KEY = window.SMART_MAP_GOOGLE_MAPS_API_KEY || new URLSearchParams(window.location.search).get('googleMapsApiKey') || '';
 const DEFAULT_CENTER = { lat: 35.681236, lng: 139.767125 };
 const STORAGE_KEY = 'smart-map-platform:stores';
+const FLYER_STORAGE_KEY = 'smart-map-platform:flyer-apartments';
 const LAYERS_STORAGE_KEY = 'smart-map-platform:kml-layers';
 const PHOTO_IMPORT_STORAGE_KEY = 'smart-map-platform:photo-imports';
 const NEAR_STORE_METERS = 50;
 const CANDIDATE_STORE_METERS = 150;
+const FLYER_LAYER = { id: 'flyer-apartments', name: 'チラシ配布マンション', color: '#2563eb', visible: true };
+const FLYER_STATUSES = ['未配布', '配布済み', '要現地確認', '配布対象外'];
+const FLYER_STATUS_COLORS = { '未配布': '#2563eb', '配布済み': '#16a34a', '要現地確認': '#facc15', '配布対象外': '#dc2626' };
+const ASSIGNEES_STORAGE_KEY = 'smart-map-platform:flyer-assignees';
+const DEFAULT_ASSIGNEES = ['福山', '担当２', '担当３'];
 const LAYER_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899'];
 
 let map;
 let userMarker;
 let infoWindow;
 let storeMarkers = [];
+let flyerMarkers = [];
 let stores = loadStores();
+let flyerApartments = loadFlyerApartments();
+let flyerAssignees = loadFlyerAssignees();
 let layers = loadLayers();
 let photoImports = loadPhotoImports();
 let currentPosition = null;
@@ -92,6 +101,27 @@ app.innerHTML = `
       </section>
 
       <section>
+        <h2>CSVインポート</h2>
+        <div class="csv-import">
+          <label>配布済み一覧-表1.csv
+            <input id="csvInput" type="file" accept=".csv,text/csv" />
+          </label>
+          <p class="hint">物件名、住所、エリア、種別、小学校区、戸数、戸数状態、配布日、次回配布、備考、緯度、経度を読み込みます。</p>
+          <p id="csvStatus" class="import-status" aria-live="polite"></p>
+        </div>
+      </section>
+
+      <section>
+        <h2>担当者</h2>
+        <div class="assignee-grid">
+          <input id="assignee1" />
+          <input id="assignee2" />
+          <input id="assignee3" />
+        </div>
+        <label>担当者で絞り込み<select id="assigneeFilter"></select></label>
+      </section>
+
+      <section>
         <div class="list-header">
           <h2>KMLレイヤー</h2>
           <span id="layerCount" class="badge">0件</span>
@@ -110,6 +140,15 @@ app.innerHTML = `
           <span id="count" class="badge">0件</span>
         </div>
         <div id="storeList" class="store-list"></div>
+      </section>
+
+      <section>
+        <div class="list-header">
+          <h2>チラシ配布一覧</h2>
+          <span id="flyerCount" class="badge">0件</span>
+        </div>
+        <div class="flyer-legend"><span class="blue">未配布</span><span class="green">配布済み</span><span class="yellow">要現地確認</span><span class="red">配布対象外</span></div>
+        <div id="flyerList" class="store-list"></div>
       </section>
     </aside>
 
@@ -140,12 +179,18 @@ const elements = {
   photoInput: document.querySelector('#photoInput'),
   photoStatus: document.querySelector('#photoStatus'),
   photoReview: document.querySelector('#photoReview'),
+  csvInput: document.querySelector('#csvInput'),
+  csvStatus: document.querySelector('#csvStatus'),
+  assigneeFilter: document.querySelector('#assigneeFilter'),
+  assigneeInputs: [document.querySelector('#assignee1'), document.querySelector('#assignee2'), document.querySelector('#assignee3')],
   kmlInput: document.querySelector('#kmlInput'),
   kmlStatus: document.querySelector('#kmlStatus'),
   layerList: document.querySelector('#layerList'),
   layerCount: document.querySelector('#layerCount'),
   storeList: document.querySelector('#storeList'),
   count: document.querySelector('#count'),
+  flyerList: document.querySelector('#flyerList'),
+  flyerCount: document.querySelector('#flyerCount'),
   name: document.querySelector('#name'),
   categoryLayer: document.querySelector('#categoryLayer'),
   category: document.querySelector('#category'),
@@ -159,7 +204,9 @@ initialize();
 async function initialize() {
   renderCategoryLayerOptions();
   renderLayerList();
+  renderAssignees();
   renderStoreList();
+  renderFlyerList();
   renderPhotoReview();
   bindEvents();
 
@@ -214,6 +261,9 @@ function bindEvents() {
     elements.placeSearchStatus.textContent = '';
     renderPlaceCandidates();
   });
+  elements.csvInput.addEventListener('change', importCsvFile);
+  elements.assigneeFilter.addEventListener('change', () => { renderFlyerList(); renderMarkers(); fitMapToVisibleData(); });
+  elements.assigneeInputs.forEach((input, index) => input.addEventListener('change', () => updateAssignee(index, input.value)));
   elements.kmlInput.addEventListener('change', importKmlFiles);
   elements.storeForm.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -300,8 +350,15 @@ async function importSinglePhoto(file, stats) {
       return `${file.name}: GPS情報がありません。未分類に保存しました。`;
     }
 
-    const existingCandidates = findNearbyStores(gps.lat, gps.lng, NEAR_STORE_METERS);
-    const placeCandidates = await searchNearbyFoodPlaces(gps.lat, gps.lng);
+    const nearest = findNearestStore(gps.lat, gps.lng);
+    if (nearest && nearest.distance <= NEAR_STORE_METERS) {
+      stores = addPhotoToStore(stores, nearest.store.id, photo);
+      stats.attached += 1;
+      return `${file.name}: ${Math.round(nearest.distance)}m先の既存店舗「${nearest.store.name}」へ追加しました。`;
+    }
+    const existingCandidates = findNearbyStores(gps.lat, gps.lng, CANDIDATE_STORE_METERS);
+    const placeCandidates = nearest && nearest.distance > CANDIDATE_STORE_METERS ? [] : await searchNearbyFoodPlaces(gps.lat, gps.lng);
+    if (!existingCandidates.length && (!nearest || nearest.distance > CANDIDATE_STORE_METERS)) stats.created += 1;
     photoPlaceCandidates = [{
       id: crypto.randomUUID(),
       photo,
@@ -924,6 +981,7 @@ function locateUser() {
 function renderMarkers() {
   if (!map || !window.google?.maps) return;
   storeMarkers.forEach((marker) => marker.setMap(null));
+  flyerMarkers.forEach((marker) => marker.setMap(null));
   storeMarkers = filteredStores().map((store) => {
     const marker = new google.maps.Marker({
       position: { lat: store.lat, lng: store.lng },
@@ -935,20 +993,26 @@ function renderMarkers() {
     marker.addListener('click', () => openStoreInfo(store, marker));
     return marker;
   });
+  flyerMarkers = filteredFlyerApartments().map((apt) => {
+    const marker = new google.maps.Marker({ position: { lat: apt.lat, lng: apt.lng }, map, title: apt.name, icon: markerIconForFlyer(apt) });
+    marker.flyerId = apt.id;
+    marker.addListener('click', () => openFlyerInfo(apt, marker));
+    return marker;
+  });
 }
 
 function fitMapToVisibleData() {
   if (!map || !window.google?.maps) return;
   const bounds = new google.maps.LatLngBounds();
   let count = 0;
-  filteredStores().forEach((store) => {
-    if (!isValidCoordinate(store.lat, store.lng)) return;
-    bounds.extend({ lat: store.lat, lng: store.lng });
+  [...filteredStores(), ...filteredFlyerApartments()].forEach((item) => {
+    if (!isValidCoordinate(item.lat, item.lng)) return;
+    bounds.extend({ lat: item.lat, lng: item.lng });
     count += 1;
   });
   if (!count) {
-    map.setCenter(DEFAULT_CENTER);
-    map.setZoom(13);
+    map.setCenter({ lat: 20, lng: 0 });
+    map.setZoom(2);
     return;
   }
   if (count === 1) {
@@ -1057,6 +1121,7 @@ function deleteStore(id) {
   renderLayerList();
   infoWindow?.close();
   renderStoreList();
+  renderFlyerList();
   renderMarkers();
 }
 
@@ -1075,7 +1140,7 @@ function filteredStores() {
   const visibleLayerIds = new Set(layers.filter((layer) => layer.visible).map((layer) => layer.id));
   const layerFilteredStores = stores.filter((store) => !store.layerId || visibleLayerIds.has(store.layerId));
   if (!keyword) return layerFilteredStores;
-  return layerFilteredStores.filter((store) => [store.name, store.category, store.description, store.layerName].some((value) => String(value || '').toLowerCase().includes(keyword)));
+  return layerFilteredStores.filter((store) => [store.name, store.category, store.description, store.layerName, store.address].some((value) => String(value || '').toLowerCase().includes(keyword)));
 }
 
 function fillCoordinates(lat, lng) {
@@ -1086,6 +1151,130 @@ function fillCoordinates(lat, lng) {
 function isValidCoordinate(lat, lng) {
   return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 }
+
+function renderAssignees() {
+  elements.assigneeInputs.forEach((input, index) => { input.value = flyerAssignees[index] || ''; });
+  elements.assigneeFilter.innerHTML = '<option value="">すべて</option>' + flyerAssignees.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+}
+
+function updateAssignee(index, value) {
+  flyerAssignees[index] = value.trim() || DEFAULT_ASSIGNEES[index];
+  saveFlyerAssignees();
+  renderAssignees();
+  renderFlyerList();
+}
+
+async function importCsvFile(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  elements.csvStatus.textContent = 'CSVを読み込んでいます...';
+  try {
+    const rows = parseCsv(await file.text());
+    const imported = rowsToFlyerApartments(rows);
+    flyerApartments = [...imported, ...flyerApartments];
+    saveFlyerApartments();
+    renderFlyerList();
+    renderMarkers();
+    fitMapToVisibleData();
+    elements.csvStatus.textContent = `${imported.length}件を「チラシ配布マンション」レイヤーへ追加しました。`;
+  } catch (error) {
+    elements.csvStatus.textContent = error.message || 'CSVの読み込みに失敗しました。';
+  } finally {
+    event.target.value = '';
+  }
+}
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [], value = '', quoted = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i], next = text[i + 1];
+    if (char === '"' && quoted && next === '"') { value += '"'; i += 1; continue; }
+    if (char === '"') { quoted = !quoted; continue; }
+    if (char === ',' && !quoted) { row.push(value); value = ''; continue; }
+    if ((char === '\n' || char === '\r') && !quoted) {
+      if (char === '\r' && next === '\n') i += 1;
+      row.push(value); rows.push(row); row = []; value = ''; continue;
+    }
+    value += char;
+  }
+  if (value || row.length) { row.push(value); rows.push(row); }
+  return rows.filter((r) => r.some((cell) => cell.trim()));
+}
+
+function rowsToFlyerApartments(rows) {
+  if (!rows.length) return [];
+  const headers = rows[0].map((h) => h.trim().replace(/^\ufeff/, ''));
+  const indexOf = (name) => headers.indexOf(name);
+  return rows.slice(1).map((row) => {
+    const get = (name) => row[indexOf(name)]?.trim() || '';
+    const splitCoord = get('緯度') && !get('経度') && get('緯度').includes(',') ? get('緯度').split(',').map((v) => Number(v.trim())) : null;
+    const lat = splitCoord ? splitCoord[0] : Number(get('緯度'));
+    const lng = splitCoord ? splitCoord[1] : Number(get('経度'));
+    if (!isValidCoordinate(lat, lng)) return null;
+    const distributionDate = get('配布日');
+    const status = normalizeFlyerStatus(get('戸数状態'), distributionDate);
+    return {
+      id: crypto.randomUUID(), layerId: FLYER_LAYER.id, layerName: FLYER_LAYER.name, name: get('物件名') || '名称未設定',
+      address: get('住所'), area: get('エリア'), type: get('種別'), schoolDistrict: get('小学校区'), units: get('戸数'), unitStatus: get('戸数状態'),
+      distributionDate, nextDistribution: get('次回配布'), memo: get('備考'), lat, lng, status, assignee: '', photos: [], createdAt: new Date().toISOString(),
+    };
+  }).filter(Boolean);
+}
+
+function normalizeFlyerStatus(unitStatus, distributionDate) {
+  const text = `${unitStatus} ${distributionDate}`;
+  if (/対象外/.test(text)) return '配布対象外';
+  if (/確認|要/.test(text)) return '要現地確認';
+  if (distributionDate || /済/.test(text)) return '配布済み';
+  return '未配布';
+}
+
+function filteredFlyerApartments() {
+  const keyword = elements.searchInput.value.trim().toLowerCase();
+  const assignee = elements.assigneeFilter.value;
+  return flyerApartments.filter((apt) => (!assignee || apt.assignee === assignee) && (!keyword || [apt.name, apt.address, apt.area, apt.type, apt.schoolDistrict, apt.memo, apt.status, apt.assignee].some((v) => String(v || '').toLowerCase().includes(keyword))));
+}
+
+function renderFlyerList() {
+  const items = filteredFlyerApartments();
+  elements.flyerCount.textContent = `${items.length}件`;
+  elements.flyerList.innerHTML = items.length ? items.map((apt) => `
+    <article class="store-card flyer-card" style="--status-color:${escapeHtml(FLYER_STATUS_COLORS[apt.status] || FLYER_STATUS_COLORS['未配布'])}">
+      <div>
+        <h3>${escapeHtml(apt.name)}</h3>
+        <p class="category">${escapeHtml(FLYER_LAYER.name)} / ${escapeHtml(apt.status)}</p>
+        <p>${escapeHtml(apt.address || '住所なし')}</p>
+        <p>${escapeHtml([apt.area, apt.type, apt.schoolDistrict, apt.units ? `${apt.units}戸` : ''].filter(Boolean).join(' / '))}</p>
+        <p>配布日: ${escapeHtml(apt.distributionDate || '未設定')} / 担当: ${escapeHtml(apt.assignee || '未設定')}</p>
+        <p>${escapeHtml(apt.memo || '')}</p>
+        ${renderPhotoThumbnails(apt.photos)}
+      </div>
+      <div class="store-actions">
+        <select data-flyer-status="${apt.id}">${FLYER_STATUSES.map((s) => `<option value="${escapeHtml(s)}" ${s === apt.status ? 'selected' : ''}>${escapeHtml(s)}</option>`).join('')}</select>
+        <select data-flyer-assignee="${apt.id}">${['', ...flyerAssignees].map((s) => `<option value="${escapeHtml(s)}" ${s === (apt.assignee || '') ? 'selected' : ''}>${escapeHtml(s || '担当者未設定')}</option>`).join('')}</select>
+        <button class="primary" data-complete-flyer="${apt.id}">配布完了</button>
+        <label class="photo-button">写真<input type="file" accept="image/*" data-flyer-photo="${apt.id}" hidden></label>
+        <button data-focus-flyer="${apt.id}">地図で見る</button>
+      </div>
+    </article>`).join('') : '<p class="empty">チラシ配布マンションがありません。</p>';
+  elements.flyerList.querySelectorAll('[data-complete-flyer]').forEach((button) => button.addEventListener('click', () => completeFlyer(button.dataset.completeFlyer)));
+  elements.flyerList.querySelectorAll('[data-focus-flyer]').forEach((button) => button.addEventListener('click', () => focusFlyer(button.dataset.focusFlyer)));
+  elements.flyerList.querySelectorAll('[data-flyer-status]').forEach((select) => select.addEventListener('change', () => updateFlyer(select.dataset.flyerStatus, { status: select.value })));
+  elements.flyerList.querySelectorAll('[data-flyer-assignee]').forEach((select) => select.addEventListener('change', () => updateFlyer(select.dataset.flyerAssignee, { assignee: select.value })));
+  elements.flyerList.querySelectorAll('[data-flyer-photo]').forEach((input) => input.addEventListener('change', () => addFlyerPhoto(input.dataset.flyerPhoto, input.files?.[0])));
+}
+
+function updateFlyer(id, patch) { flyerApartments = flyerApartments.map((apt) => apt.id === id ? { ...apt, ...patch } : apt); saveFlyerApartments(); renderFlyerList(); renderMarkers(); }
+function completeFlyer(id) { const apt = flyerApartments.find((item) => item.id === id); updateFlyer(id, { status: '配布済み', distributionDate: new Date().toISOString().slice(0, 10), assignee: apt?.assignee || flyerAssignees[0] }); }
+async function addFlyerPhoto(id, file) { if (!file) return; const photo = { id: crypto.randomUUID(), name: file.name, dataUrl: await readFileAsDataUrl(file), importedAt: new Date().toISOString() }; flyerApartments = flyerApartments.map((apt) => apt.id === id ? { ...apt, photos: [photo, ...(apt.photos || [])] } : apt); saveFlyerApartments(); renderFlyerList(); renderMarkers(); }
+function markerIconForFlyer(apt) { return { path: google.maps.SymbolPath.CIRCLE, scale: 9, fillColor: FLYER_STATUS_COLORS[apt.status] || FLYER_STATUS_COLORS['未配布'], fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 2 }; }
+function openFlyerInfo(apt, marker) { infoWindow.setContent(`<div class="info-window"><strong>${escapeHtml(apt.name)}</strong><br>${escapeHtml(FLYER_LAYER.name)}<br>${escapeHtml(apt.status)} / ${escapeHtml(apt.assignee || '担当者未設定')}<br>${escapeHtml(apt.address || '')}${renderInfoWindowPhotos(apt.photos)}</div>`); infoWindow.open({ anchor: marker, map }); }
+function focusFlyer(id) { const apt = flyerApartments.find((item) => item.id === id); if (!apt || !map) return; map.setCenter({ lat: apt.lat, lng: apt.lng }); map.setZoom(16); const marker = flyerMarkers.find((item) => item.flyerId === id); if (marker) openFlyerInfo(apt, marker); }
+function loadFlyerApartments() { try { return JSON.parse(localStorage.getItem(FLYER_STORAGE_KEY)) || []; } catch { return []; } }
+function loadFlyerAssignees() { try { const parsed = JSON.parse(localStorage.getItem(ASSIGNEES_STORAGE_KEY)); return Array.isArray(parsed) && parsed.length === 3 ? parsed : DEFAULT_ASSIGNEES; } catch { return DEFAULT_ASSIGNEES; } }
+function saveFlyerApartments() { localStorage.setItem(FLYER_STORAGE_KEY, JSON.stringify(flyerApartments)); }
+function saveFlyerAssignees() { localStorage.setItem(ASSIGNEES_STORAGE_KEY, JSON.stringify(flyerAssignees)); }
 
 function loadStores() {
   try {
