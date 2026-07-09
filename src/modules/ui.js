@@ -1,5 +1,5 @@
 import { CANDIDATE_STORE_METERS, DEFAULT_ASSIGNEES, DEFAULT_CENTER, FLYER_LAYER, FLYER_STATUS_COLORS, FLYER_STATUSES, GOOGLE_MAPS_API_KEY, LAYER_COLORS, NEAR_STORE_METERS } from './constants.js';
-import { loadFlyerApartments, loadFlyerAssignees, loadLayers, loadPhotoImports, loadStores, saveFlyerApartments, saveFlyerAssignees, saveLayers, savePhotoImports, saveStores } from './storage.js';
+import { loadFlyerApartments, loadFlyerAssignees, loadLayers, loadLayerVisibility, loadPhotoImports, loadStores, saveFlyerApartments, saveFlyerAssignees, saveLayers, saveLayerVisibility, savePhotoImports, saveStores } from './storage.js';
 import { distanceMeters, escapeHtml, isValidCoordinate, readFileAsDataUrl } from './utils.js';
 
 let map;
@@ -11,6 +11,7 @@ let stores = loadStores();
 let flyerApartments = loadFlyerApartments().map((apt) => ({ ...apt, status: normalizeFlyerStatus(apt.status, apt.distributionDate) }));
 let flyerAssignees = loadFlyerAssignees();
 let layers = loadLayers();
+let layerVisibility = loadLayerVisibility();
 let photoImports = loadPhotoImports();
 let currentPosition = null;
 let googleMapsPromise = null;
@@ -1011,27 +1012,48 @@ function openStoreInfo(store, marker) {
 
 function renderLayerList() {
   renderCategoryLayerOptions();
-  elements.layerCount.textContent = `${layers.length}件`;
-  elements.layerList.innerHTML = layers.length
-    ? layers.map((layer) => `
+  const displayLayers = visibleLayerControls();
+  elements.layerCount.textContent = `${displayLayers.length}件`;
+  elements.layerList.innerHTML = displayLayers.length
+    ? displayLayers.map((layer) => `
       <label class="layer-card">
-        <input type="checkbox" data-toggle-layer="${layer.id}" ${layer.visible ? 'checked' : ''} />
+        <input type="checkbox" data-toggle-layer="${escapeHtml(layer.id)}" ${isLayerVisible(layer.id) ? 'checked' : ''} />
         <span class="layer-color" style="--layer-color: ${escapeHtml(layer.color)}"></span>
-        <span><strong>${escapeHtml(layer.name)}</strong><small>${escapeHtml(layer.fileName)} / ${countStoresInLayer(layer.id)}件</small></span>
+        <span><strong>${escapeHtml(layer.name)}（${layer.count}件）</strong><small>${escapeHtml(layer.detail)}</small></span>
       </label>`).join('')
-    : '<p class="empty">KMLを読み込むと、ここでレイヤーの表示/非表示を切り替えられます。</p>';
+    : '<p class="empty">KMLやチラシ配布CSVを読み込むと、ここでレイヤーの表示/非表示を切り替えられます。</p>';
 
   elements.layerList.querySelectorAll('[data-toggle-layer]').forEach((checkbox) => {
     checkbox.addEventListener('change', () => toggleLayer(checkbox.dataset.toggleLayer, checkbox.checked));
   });
 }
 
+function visibleLayerControls() {
+  return [
+    { id: FLYER_LAYER.id, name: FLYER_LAYER.name, color: FLYER_LAYER.color, detail: 'CSVレイヤー', count: flyerApartments.length },
+    ...layers.map((layer) => ({ id: layer.id, name: layer.name, color: layer.color, detail: layer.fileName || 'KMLレイヤー', count: countStoresInLayer(layer.id) })),
+  ];
+}
+
 function toggleLayer(layerId, visible) {
-  layers = layers.map((layer) => layer.id === layerId ? { ...layer, visible } : layer);
-  saveLayers(layers);
+  layerVisibility = { ...layerVisibility, [layerId]: visible };
+  if (layerId !== FLYER_LAYER.id) {
+    layers = layers.map((layer) => layer.id === layerId ? { ...layer, visible } : layer);
+    saveLayers(layers);
+  }
+  saveLayerVisibility(layerVisibility);
+  renderLayerList();
   renderStoreList();
+  renderFlyerList();
   renderMarkers();
   fitMapToVisibleData();
+}
+
+function isLayerVisible(layerId) {
+  if (typeof layerVisibility[layerId] === 'boolean') return layerVisibility[layerId];
+  if (layerId === FLYER_LAYER.id) return FLYER_LAYER.visible;
+  const layer = getLayerById(layerId);
+  return layer?.visible !== false;
 }
 
 function countStoresInLayer(layerId) {
@@ -1113,7 +1135,7 @@ function focusStore(id) {
 
 function filteredStores() {
   const keyword = elements.searchInput.value.trim().toLowerCase();
-  const visibleLayerIds = new Set(layers.filter((layer) => layer.visible).map((layer) => layer.id));
+  const visibleLayerIds = new Set(layers.filter((layer) => isLayerVisible(layer.id)).map((layer) => layer.id));
   const layerFilteredStores = stores.filter((store) => !store.layerId || visibleLayerIds.has(store.layerId));
   if (!keyword) return layerFilteredStores;
   return layerFilteredStores.filter((store) => [store.name, store.category, store.description, store.layerName, store.address].some((value) => String(value || '').toLowerCase().includes(keyword)));
@@ -1148,6 +1170,7 @@ async function importCsvFile(event) {
     const imported = rowsToFlyerApartments(rows);
     flyerApartments = [...imported, ...flyerApartments];
     saveFlyerApartments(flyerApartments);
+    renderLayerList();
     renderFlyerList();
     renderMarkers();
     fitMapToVisibleData();
@@ -1217,7 +1240,7 @@ function normalizeFlyerAssignee(name) {
 function filteredFlyerApartments() {
   const keyword = elements.searchInput.value.trim().toLowerCase();
   const assignee = elements.assigneeFilter.value;
-  return flyerApartments.filter((apt) => (!assignee || apt.assignee === assignee) && (!keyword || [apt.name, apt.address, apt.area, apt.type, apt.schoolDistrict, apt.memo, apt.status, apt.assignee].some((v) => String(v || '').toLowerCase().includes(keyword))));
+  return flyerApartments.filter((apt) => isLayerVisible(FLYER_LAYER.id) && (!assignee || apt.assignee === assignee) && (!keyword || [apt.name, apt.address, apt.area, apt.type, apt.schoolDistrict, apt.memo, apt.status, apt.assignee].some((v) => String(v || '').toLowerCase().includes(keyword))));
 }
 
 function renderFlyerList() {

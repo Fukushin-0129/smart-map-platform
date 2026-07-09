@@ -3,6 +3,7 @@ export const DEFAULT_CENTER = { lat: 35.681236, lng: 139.767125 };
 export const STORAGE_KEY = 'smart-map-platform:stores';
 export const FLYER_STORAGE_KEY = 'smart-map-platform:flyer-apartments';
 export const LAYERS_STORAGE_KEY = 'smart-map-platform:kml-layers';
+export const LAYER_VISIBILITY_STORAGE_KEY = 'smart-map-platform:layer-visibility';
 export const PHOTO_IMPORT_STORAGE_KEY = 'smart-map-platform:photo-imports';
 export const NEAR_STORE_METERS = 50;
 export const CANDIDATE_STORE_METERS = 150;
