@@ -120,9 +120,9 @@ app.innerHTML = `
       <section class="mode-section" data-mode="flyer" hidden>
         <h2>担当者</h2>
         <div class="assignee-grid">
-          <input id="assignee1" />
-          <input id="assignee2" />
-          <input id="assignee3" />
+          <input id="assignee1" placeholder="福山" />
+          <input id="assignee2" placeholder="担当２" />
+          <input id="assignee3" placeholder="担当３" />
         </div>
         <label>担当者で絞り込み<select id="assigneeFilter"></select></label>
       </section>
