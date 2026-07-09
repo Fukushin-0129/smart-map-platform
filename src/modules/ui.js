@@ -1,5 +1,5 @@
 import { CANDIDATE_STORE_METERS, DEFAULT_ASSIGNEES, DEFAULT_CENTER, FLYER_LAYER, FLYER_STATUS_COLORS, FLYER_STATUSES, GOOGLE_MAPS_API_KEY, LAYER_COLORS, NEAR_STORE_METERS } from './constants.js';
-import { loadFlyerApartments, loadFlyerAssignees, loadLayers, loadPhotoImports, loadStores, saveFlyerApartments, saveFlyerAssignees, saveLayers, savePhotoImports, saveStores } from './storage.js';
+import { loadFlyerApartments, loadFlyerAssignees, loadLayers, loadLayerVisibility, loadPhotoImports, loadStores, saveFlyerApartments, saveFlyerAssignees, saveLayers, saveLayerVisibility, savePhotoImports, saveStores } from './storage.js';
 import { distanceMeters, escapeHtml, isValidCoordinate, readFileAsDataUrl } from './utils.js';
 
 let map;
@@ -11,12 +11,14 @@ let stores = loadStores();
 let flyerApartments = loadFlyerApartments().map((apt) => ({ ...apt, status: normalizeFlyerStatus(apt.status, apt.distributionDate) }));
 let flyerAssignees = loadFlyerAssignees();
 let layers = loadLayers();
+let layerVisibility = loadLayerVisibility();
 let photoImports = loadPhotoImports();
 let currentPosition = null;
 let googleMapsPromise = null;
 let placesService = null;
 let keywordPlaceCandidates = [];
 let photoPlaceCandidates = [];
+let flyerRoutes = [];
 
 const app = document.querySelector('#app');
 
@@ -136,6 +138,8 @@ app.innerHTML = `
         </div>
         <div id="flyerStatusSummary" class="flyer-status-summary" aria-live="polite"></div>
         <div class="flyer-legend"><span class="blue">未配布</span><span class="green">配布済み</span><span class="red">配布不可</span><span class="yellow">不在</span></div>
+        <button type="button" id="createTwoPersonRouteButton" class="primary flyer-route-button">2人でルート作成</button>
+        <div id="flyerRouteList" class="flyer-route-list"></div>
         <div id="flyerList" class="store-list"></div>
       </section>
     </aside>
@@ -180,6 +184,8 @@ const elements = {
   flyerList: document.querySelector('#flyerList'),
   flyerCount: document.querySelector('#flyerCount'),
   flyerStatusSummary: document.querySelector('#flyerStatusSummary'),
+  createTwoPersonRouteButton: document.querySelector('#createTwoPersonRouteButton'),
+  flyerRouteList: document.querySelector('#flyerRouteList'),
   name: document.querySelector('#name'),
   categoryLayer: document.querySelector('#categoryLayer'),
   category: document.querySelector('#category'),
@@ -249,7 +255,8 @@ function bindEvents() {
     renderPlaceCandidates();
   });
   elements.csvInput.addEventListener('change', importCsvFile);
-  elements.assigneeFilter.addEventListener('change', () => { renderFlyerList(); renderMarkers(); fitMapToVisibleData(); });
+  elements.createTwoPersonRouteButton.addEventListener('click', createTwoPersonRoutes);
+  elements.assigneeFilter.addEventListener('change', () => { flyerRoutes = []; renderFlyerRoutes(); renderFlyerList(); renderMarkers(); fitMapToVisibleData(); });
   elements.assigneeInputs.forEach((input, index) => input.addEventListener('change', () => updateAssignee(index, input.value)));
   elements.kmlInput.addEventListener('change', importKmlFiles);
   elements.storeForm.addEventListener('submit', (event) => {
@@ -1005,27 +1012,48 @@ function openStoreInfo(store, marker) {
 
 function renderLayerList() {
   renderCategoryLayerOptions();
-  elements.layerCount.textContent = `${layers.length}件`;
-  elements.layerList.innerHTML = layers.length
-    ? layers.map((layer) => `
+  const displayLayers = visibleLayerControls();
+  elements.layerCount.textContent = `${displayLayers.length}件`;
+  elements.layerList.innerHTML = displayLayers.length
+    ? displayLayers.map((layer) => `
       <label class="layer-card">
-        <input type="checkbox" data-toggle-layer="${layer.id}" ${layer.visible ? 'checked' : ''} />
+        <input type="checkbox" data-toggle-layer="${escapeHtml(layer.id)}" ${isLayerVisible(layer.id) ? 'checked' : ''} />
         <span class="layer-color" style="--layer-color: ${escapeHtml(layer.color)}"></span>
-        <span><strong>${escapeHtml(layer.name)}</strong><small>${escapeHtml(layer.fileName)} / ${countStoresInLayer(layer.id)}件</small></span>
+        <span><strong>${escapeHtml(layer.name)}（${layer.count}件）</strong><small>${escapeHtml(layer.detail)}</small></span>
       </label>`).join('')
-    : '<p class="empty">KMLを読み込むと、ここでレイヤーの表示/非表示を切り替えられます。</p>';
+    : '<p class="empty">KMLやチラシ配布CSVを読み込むと、ここでレイヤーの表示/非表示を切り替えられます。</p>';
 
   elements.layerList.querySelectorAll('[data-toggle-layer]').forEach((checkbox) => {
     checkbox.addEventListener('change', () => toggleLayer(checkbox.dataset.toggleLayer, checkbox.checked));
   });
 }
 
+function visibleLayerControls() {
+  return [
+    { id: FLYER_LAYER.id, name: FLYER_LAYER.name, color: FLYER_LAYER.color, detail: 'CSVレイヤー', count: flyerApartments.length },
+    ...layers.map((layer) => ({ id: layer.id, name: layer.name, color: layer.color, detail: layer.fileName || 'KMLレイヤー', count: countStoresInLayer(layer.id) })),
+  ];
+}
+
 function toggleLayer(layerId, visible) {
-  layers = layers.map((layer) => layer.id === layerId ? { ...layer, visible } : layer);
-  saveLayers(layers);
+  layerVisibility = { ...layerVisibility, [layerId]: visible };
+  if (layerId !== FLYER_LAYER.id) {
+    layers = layers.map((layer) => layer.id === layerId ? { ...layer, visible } : layer);
+    saveLayers(layers);
+  }
+  saveLayerVisibility(layerVisibility);
+  renderLayerList();
   renderStoreList();
+  renderFlyerList();
   renderMarkers();
   fitMapToVisibleData();
+}
+
+function isLayerVisible(layerId) {
+  if (typeof layerVisibility[layerId] === 'boolean') return layerVisibility[layerId];
+  if (layerId === FLYER_LAYER.id) return FLYER_LAYER.visible;
+  const layer = getLayerById(layerId);
+  return layer?.visible !== false;
 }
 
 function countStoresInLayer(layerId) {
@@ -1091,6 +1119,7 @@ function deleteStore(id) {
   infoWindow?.close();
   renderStoreList();
   renderFlyerList();
+  renderFlyerRoutes();
   renderMarkers();
 }
 
@@ -1106,7 +1135,7 @@ function focusStore(id) {
 
 function filteredStores() {
   const keyword = elements.searchInput.value.trim().toLowerCase();
-  const visibleLayerIds = new Set(layers.filter((layer) => layer.visible).map((layer) => layer.id));
+  const visibleLayerIds = new Set(layers.filter((layer) => isLayerVisible(layer.id)).map((layer) => layer.id));
   const layerFilteredStores = stores.filter((store) => !store.layerId || visibleLayerIds.has(store.layerId));
   if (!keyword) return layerFilteredStores;
   return layerFilteredStores.filter((store) => [store.name, store.category, store.description, store.layerName, store.address].some((value) => String(value || '').toLowerCase().includes(keyword)));
@@ -1141,6 +1170,7 @@ async function importCsvFile(event) {
     const imported = rowsToFlyerApartments(rows);
     flyerApartments = [...imported, ...flyerApartments];
     saveFlyerApartments(flyerApartments);
+    renderLayerList();
     renderFlyerList();
     renderMarkers();
     fitMapToVisibleData();
@@ -1176,7 +1206,7 @@ function rowsToFlyerApartments(rows) {
   const indexOf = (...names) => names.map((name) => headers.indexOf(name)).find((index) => index >= 0) ?? -1;
   return rows.slice(1).map((row) => {
     const get = (...names) => row[indexOf(...names)]?.trim() || '';
-    const latText = get('緯度', 'lat', 'latitude');
+    const latText = get('緯度', '緯度・経度', '緯度経度', '座標', 'lat', 'latitude');
     const lngText = get('経度', 'lng', 'lon', 'longitude');
     const splitCoord = latText && !lngText && latText.includes(',') ? latText.split(',').map((v) => Number(v.trim())) : null;
     const lat = splitCoord ? splitCoord[0] : Number(latText);
@@ -1210,7 +1240,7 @@ function normalizeFlyerAssignee(name) {
 function filteredFlyerApartments() {
   const keyword = elements.searchInput.value.trim().toLowerCase();
   const assignee = elements.assigneeFilter.value;
-  return flyerApartments.filter((apt) => (!assignee || apt.assignee === assignee) && (!keyword || [apt.name, apt.address, apt.area, apt.type, apt.schoolDistrict, apt.memo, apt.status, apt.assignee].some((v) => String(v || '').toLowerCase().includes(keyword))));
+  return flyerApartments.filter((apt) => isLayerVisible(FLYER_LAYER.id) && (!assignee || apt.assignee === assignee) && (!keyword || [apt.name, apt.address, apt.area, apt.type, apt.schoolDistrict, apt.memo, apt.status, apt.assignee].some((v) => String(v || '').toLowerCase().includes(keyword))));
 }
 
 function renderFlyerList() {
@@ -1231,17 +1261,80 @@ function renderFlyerList() {
       <div class="store-actions">
         <select data-flyer-status="${apt.id}">${FLYER_STATUSES.map((s) => `<option value="${escapeHtml(s)}" ${s === apt.status ? 'selected' : ''}>${escapeHtml(s)}</option>`).join('')}</select>
         <select data-flyer-assignee="${apt.id}">${['', ...flyerAssignees].map((s) => `<option value="${escapeHtml(s)}" ${s === (apt.assignee || '') ? 'selected' : ''}>${escapeHtml(s || '担当者未設定')}</option>`).join('')}</select>
-        <button class="primary" data-complete-flyer="${apt.id}">配布完了</button>
+        <div class="flyer-status-buttons flyer-card-status-buttons"><button class="primary" data-set-flyer-status="配布済み" data-flyer-id="${apt.id}">配布済み</button><button data-set-flyer-status="不在" data-flyer-id="${apt.id}">不在</button><button class="danger" data-set-flyer-status="配布不可" data-flyer-id="${apt.id}">配布不可</button></div>
         <label class="photo-button">写真<input type="file" accept="image/*" data-flyer-photo="${apt.id}" hidden></label>
         <button data-focus-flyer="${apt.id}">地図で見る</button>
       </div>
     </article>`).join('') : '<p class="empty">チラシ配布マンションがありません。</p>';
-  elements.flyerList.querySelectorAll('[data-complete-flyer]').forEach((button) => button.addEventListener('click', () => completeFlyer(button.dataset.completeFlyer)));
+  elements.flyerList.querySelectorAll('[data-set-flyer-status]').forEach((button) => button.addEventListener('click', () => setFlyerStatusFromButton(button.dataset.flyerId, button.dataset.setFlyerStatus)));
   elements.flyerList.querySelectorAll('[data-focus-flyer]').forEach((button) => button.addEventListener('click', () => focusFlyer(button.dataset.focusFlyer)));
   elements.flyerList.querySelectorAll('[data-flyer-status]').forEach((select) => select.addEventListener('change', () => updateFlyer(select.dataset.flyerStatus, { status: select.value })));
   elements.flyerList.querySelectorAll('[data-flyer-assignee]').forEach((select) => select.addEventListener('change', () => updateFlyer(select.dataset.flyerAssignee, { assignee: select.value })));
   elements.flyerList.querySelectorAll('[data-flyer-photo]').forEach((input) => input.addEventListener('change', () => addFlyerPhoto(input.dataset.flyerPhoto, input.files?.[0])));
 }
+
+function renderFlyerRoutes() {
+  elements.flyerRouteList.innerHTML = flyerRoutes.length ? flyerRoutes.map((route) => `
+    <section class="flyer-route-card" style="--route-color:${escapeHtml(route.color)}">
+      <h3>${escapeHtml(route.name)}ルート</h3>
+      <ol>${route.items.map((apt) => `<li><button type="button" data-focus-flyer="${escapeHtml(apt.id)}">${escapeHtml(apt.name)}</button><small>${escapeHtml(apt.address || '')}</small></li>`).join('')}</ol>
+    </section>`).join('') : '';
+  elements.flyerRouteList.querySelectorAll('[data-focus-flyer]').forEach((button) => button.addEventListener('click', () => focusFlyer(button.dataset.focusFlyer)));
+}
+
+function createTwoPersonRoutes() {
+  const targets = filteredFlyerApartments().filter((apt) => apt.status === '未配布' && isValidCoordinate(apt.lat, apt.lng));
+  if (!targets.length) {
+    flyerRoutes = [];
+    renderFlyerRoutes();
+    renderMarkers();
+    elements.csvStatus.textContent = '未配布かつ緯度経度がある物件がありません。';
+    return;
+  }
+  const activeAssignees = flyerAssignees.filter((name) => String(name || '').trim());
+  const routeNames = [activeAssignees[0] || '担当1', activeAssignees[1] || '担当2'];
+  const split = splitFlyersForTwoPeople(targets);
+  flyerRoutes = split
+    .map((items, index) => ({ name: routeNames[index], color: index === 0 ? '#7c3aed' : '#ea580c', items: nearestNeighborRoute(items) }))
+    .filter((route) => route.items.length);
+  renderFlyerRoutes();
+  renderMarkers();
+  fitMapToVisibleData();
+  elements.csvStatus.textContent = `${targets.length}件の未配布物件を2人分のルートに分けました。`;
+}
+
+function splitFlyersForTwoPeople(items) {
+  if (items.length <= 1) return [items, []];
+  const sorted = [...items].sort((a, b) => a.lng === b.lng ? a.lat - b.lat : a.lng - b.lng);
+  const left = sorted.slice(0, Math.ceil(sorted.length / 2));
+  const right = sorted.slice(Math.ceil(sorted.length / 2));
+  return [left, right];
+}
+
+function nearestNeighborRoute(items) {
+  const remaining = [...items];
+  const route = [];
+  let current = remaining.shift();
+  while (current) {
+    route.push(current);
+    if (!remaining.length) break;
+    let nextIndex = 0;
+    remaining.forEach((apt, index) => {
+      if (distanceMeters(current.lat, current.lng, apt.lat, apt.lng) < distanceMeters(current.lat, current.lng, remaining[nextIndex].lat, remaining[nextIndex].lng)) nextIndex = index;
+    });
+    current = remaining.splice(nextIndex, 1)[0];
+  }
+  return route;
+}
+
+function routeMetaForFlyer(id) {
+  for (const route of flyerRoutes) {
+    const index = route.items.findIndex((apt) => apt.id === id);
+    if (index >= 0) return { color: route.color, label: String(index + 1) };
+  }
+  return null;
+}
+
 
 function renderFlyerStatusSummary(items) {
   const counts = FLYER_STATUSES.reduce((result, status) => ({ ...result, [status]: 0 }), {});
@@ -1251,17 +1344,33 @@ function renderFlyerStatusSummary(items) {
 }
 
 function updateFlyer(id, patch) {
+  flyerRoutes = flyerRoutes.map((route) => ({ ...route, items: route.items.map((apt) => apt.id === id ? { ...apt, ...patch } : apt).filter((apt) => apt.status === '未配布') })).filter((route) => route.items.length);
   flyerApartments = flyerApartments.map((apt) => apt.id === id ? { ...apt, ...patch, updatedAt: new Date().toISOString() } : apt);
   saveFlyerApartments(flyerApartments);
   renderFlyerList();
+  renderFlyerRoutes();
   renderMarkers();
   const apt = flyerApartments.find((item) => item.id === id);
   const marker = flyerMarkers.find((item) => item.flyerId === id);
   if (apt && marker && infoWindow?.getMap()) openFlyerInfo(apt, marker);
 }
-function completeFlyer(id) { const apt = flyerApartments.find((item) => item.id === id); updateFlyer(id, { status: '配布済み', distributionDate: new Date().toISOString().slice(0, 10), assignee: apt?.assignee || flyerAssignees[0] }); }
+function setFlyerStatusFromButton(id, status) {
+  const apt = flyerApartments.find((item) => item.id === id);
+  updateFlyer(id, { status, distributionDate: status === '配布済み' ? new Date().toISOString().slice(0, 10) : apt?.distributionDate || '', assignee: apt?.assignee || flyerAssignees[0] || '' });
+}
 async function addFlyerPhoto(id, file) { if (!file) return; const photo = { id: crypto.randomUUID(), name: file.name, dataUrl: await readFileAsDataUrl(file), importedAt: new Date().toISOString() }; flyerApartments = flyerApartments.map((apt) => apt.id === id ? { ...apt, photos: [photo, ...(apt.photos || [])] } : apt); saveFlyerApartments(flyerApartments); renderFlyerList(); renderMarkers(); }
-function markerIconForFlyer(apt) { return { path: google.maps.SymbolPath.CIRCLE, scale: 9, fillColor: FLYER_STATUS_COLORS[apt.status] || FLYER_STATUS_COLORS['未配布'], fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 2 }; }
+function markerIconForFlyer(apt) {
+  const route = routeMetaForFlyer(apt.id);
+  if (route) {
+    return { url: numberedMarkerSvg(route.color, route.label), scaledSize: new google.maps.Size(34, 42), anchor: new google.maps.Point(17, 42), labelOrigin: new google.maps.Point(17, 16) };
+  }
+  return { path: google.maps.SymbolPath.CIRCLE, scale: 9, fillColor: FLYER_STATUS_COLORS[apt.status] || FLYER_STATUS_COLORS['未配布'], fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 2 };
+}
+
+function numberedMarkerSvg(color, label) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="34" height="42" viewBox="0 0 34 42"><path d="M17 41S3 27.5 3 16.5C3 8.5 9.3 2 17 2s14 6.5 14 14.5C31 27.5 17 41 17 41Z" fill="${color}" stroke="white" stroke-width="3"/><text x="17" y="21" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="700" fill="white">${escapeHtml(label)}</text></svg>`;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
 function openFlyerInfo(apt, marker) {
   infoWindow.setContent(`<div class="info-window flyer-info-window">
     <strong>${escapeHtml(apt.name)}</strong><br>
