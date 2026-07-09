@@ -122,3 +122,13 @@ input:focus, textarea:focus, select:focus { outline: 3px solid #bbf7d0; border-c
 .flyer-status-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; margin-bottom: 0.75rem; }
 .flyer-status-summary span { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; border: 1px solid #d9f4df; border-left: 6px solid var(--status-color); border-radius: 14px; background: #fbfffc; padding: 0.65rem 0.75rem; color: #31553b; font-weight: 800; }
 .flyer-status-summary strong { color: #17301f; }
+
+.flyer-status-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.45rem; margin-top: 0.65rem; }
+.flyer-status-buttons button { border-radius: 14px; padding: 0.65rem 0.5rem; font-size: 0.9rem; }
+
+@media (max-width: 560px) {
+  button, .photo-button, select, input { min-height: 48px; }
+  .flyer-card .store-actions { grid-template-columns: 1fr; min-width: 0; }
+  .flyer-card select, .flyer-card button, .flyer-card .photo-button { width: 100%; padding: 0.9rem 1rem; }
+  .flyer-status-summary { grid-template-columns: 1fr; }
+}

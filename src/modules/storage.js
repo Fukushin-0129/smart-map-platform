@@ -18,7 +18,7 @@ export function loadFlyerApartments() {
 export function loadFlyerAssignees() {
   try {
     const parsed = JSON.parse(localStorage.getItem(ASSIGNEES_STORAGE_KEY));
-    return Array.isArray(parsed) && parsed.length === 3 ? parsed : DEFAULT_ASSIGNEES;
+    return Array.isArray(parsed) ? [...parsed, ...DEFAULT_ASSIGNEES].slice(0, 10) : DEFAULT_ASSIGNEES;
   } catch { return DEFAULT_ASSIGNEES; }
 }
 export function saveStores(stores) { localStorage.setItem(STORAGE_KEY, JSON.stringify(stores)); }
