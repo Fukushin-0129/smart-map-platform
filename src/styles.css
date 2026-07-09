@@ -132,3 +132,36 @@ input:focus, textarea:focus, select:focus { outline: 3px solid #bbf7d0; border-c
   .flyer-card select, .flyer-card button, .flyer-card .photo-button { width: 100%; padding: 0.9rem 1rem; }
   .flyer-status-summary { grid-template-columns: 1fr; }
 }
+
+
+.flyer-route-button { width: 100%; margin: 0.25rem 0 0.75rem; min-height: 54px; font-size: 1rem; }
+.flyer-route-list { display: grid; gap: 0.75rem; margin-bottom: 0.9rem; }
+.flyer-route-card { border: 1px solid #d9f4df; border-left: 8px solid var(--route-color); border-radius: 18px; background: #fbfffc; padding: 0.85rem; }
+.flyer-route-card h3 { margin: 0 0 0.55rem; color: #17301f; }
+.flyer-route-card ol { margin: 0; padding-left: 1.35rem; display: grid; gap: 0.45rem; }
+.flyer-route-card li button { display: inline; padding: 0; border-radius: 0; background: transparent; color: #14532d; font-weight: 800; text-align: left; }
+.flyer-route-card li small { display: block; color: #607568; margin-top: 0.1rem; }
+.flyer-card-status-buttons { grid-template-columns: 1fr; }
+.flyer-card-status-buttons button { min-height: 52px; font-size: 1rem; }
+
+@media (max-width: 560px) {
+  .flyer-status-buttons { grid-template-columns: 1fr; }
+  .flyer-status-buttons button, .flyer-route-button { min-height: 56px; font-size: 1.05rem; }
+}
+
+.bounds-flyer-panel { border-top: 1px solid #e7f8ea; background: #fbfffc; padding: 0.75rem 1rem; max-height: 180px; overflow: auto; }
+.bounds-panel-header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.55rem; color: #17301f; }
+.bounds-panel-header span { border-radius: 999px; background: #dcfce7; color: #166534; font-weight: 800; padding: 0.25rem 0.55rem; }
+.bounds-panel-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.45rem; }
+.bounds-panel-list button { border-radius: 14px; background: #f0fdf4; border: 1px solid #d9f4df; padding: 0.65rem 0.75rem; text-align: left; }
+.bounds-panel-list small { display: block; color: #607568; margin-top: 0.15rem; }
+.flyer-info-window p, .mobile-flyer-detail-card p { margin: 0.35rem 0; }
+.flyer-complete-button { width: 100%; margin-top: 0.45rem; min-height: 48px; }
+.mobile-flyer-detail { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; padding: 0 0.8rem 0.8rem; }
+.mobile-flyer-detail-card { position: relative; border: 1px solid #d9f4df; border-radius: 22px 22px 18px 18px; background: white; box-shadow: 0 -12px 36px rgba(20, 83, 45, 0.18); padding: 1rem; color: #17301f; }
+.mobile-detail-close { position: absolute; top: 0.55rem; right: 0.55rem; width: 40px; height: 40px; padding: 0; display: inline-grid; place-items: center; background: #eefdf2; }
+
+@media (max-width: 700px) {
+  .bounds-flyer-panel { max-height: 130px; padding: 0.65rem; }
+  .bounds-panel-list { grid-template-columns: 1fr; }
+}

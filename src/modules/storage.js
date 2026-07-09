@@ -1,10 +1,16 @@
-import { ASSIGNEES_STORAGE_KEY, DEFAULT_ASSIGNEES, FLYER_STORAGE_KEY, LAYERS_STORAGE_KEY, PHOTO_IMPORT_STORAGE_KEY, STORAGE_KEY } from './constants.js';
+import { ASSIGNEES_STORAGE_KEY, DEFAULT_ASSIGNEES, FLYER_STORAGE_KEY, LAYERS_STORAGE_KEY, LAYER_VISIBILITY_STORAGE_KEY, PHOTO_IMPORT_STORAGE_KEY, STORAGE_KEY } from './constants.js';
 
 export function loadStores() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { return []; }
 }
 export function loadLayers() {
   try { return JSON.parse(localStorage.getItem(LAYERS_STORAGE_KEY)) || []; } catch { return []; }
+}
+export function loadLayerVisibility() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LAYER_VISIBILITY_STORAGE_KEY));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch { return {}; }
 }
 export function loadPhotoImports() {
   try {
@@ -23,6 +29,7 @@ export function loadFlyerAssignees() {
 }
 export function saveStores(stores) { localStorage.setItem(STORAGE_KEY, JSON.stringify(stores)); }
 export function saveLayers(layers) { localStorage.setItem(LAYERS_STORAGE_KEY, JSON.stringify(layers)); }
+export function saveLayerVisibility(layerVisibility) { localStorage.setItem(LAYER_VISIBILITY_STORAGE_KEY, JSON.stringify(layerVisibility)); }
 export function savePhotoImports(photoImports) { localStorage.setItem(PHOTO_IMPORT_STORAGE_KEY, JSON.stringify(photoImports)); }
 export function saveFlyerApartments(flyerApartments) { localStorage.setItem(FLYER_STORAGE_KEY, JSON.stringify(flyerApartments)); }
 export function saveFlyerAssignees(flyerAssignees) { localStorage.setItem(ASSIGNEES_STORAGE_KEY, JSON.stringify(flyerAssignees)); }
