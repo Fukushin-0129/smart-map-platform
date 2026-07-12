@@ -1105,7 +1105,8 @@ function renderMarkers() {
   if (!map || !window.google?.maps) return;
   storeMarkers.forEach((marker) => marker.setMap(null));
   flyerMarkers.forEach((marker) => marker.setMap(null));
-  storeMarkers = filteredStores().map((store) => {
+
+  storeMarkers = visibleStorePlaces().map((store) => {
     const marker = new google.maps.Marker({
       position: { lat: store.lat, lng: store.lng },
       map,
@@ -1113,13 +1114,20 @@ function renderMarkers() {
       icon: markerIconForStore(store),
     });
     marker.storeId = store.id;
-    marker.addListener('click', () => openStoreInfo(store, marker));
+    marker.addListener('click', () => {
+      const latestStore = stores.find((item) => item.id === marker.storeId) || store;
+      openStoreInfo(latestStore, marker);
+    });
     return marker;
   });
-  flyerMarkers = filteredFlyerApartments().map((apt) => {
+
+  flyerMarkers = visibleFlyerPlaces().map((apt) => {
     const marker = new google.maps.Marker({ position: { lat: apt.lat, lng: apt.lng }, map, title: apt.name, icon: markerIconForFlyer(apt) });
     marker.flyerId = apt.id;
-    marker.addListener('click', () => openFlyerInfo(apt, marker));
+    marker.addListener('click', () => {
+      const latestApartment = flyerApartments.find((item) => item.id === marker.flyerId) || apt;
+      openFlyerInfo(latestApartment, marker);
+    });
     return marker;
   });
 }
@@ -1128,8 +1136,7 @@ function fitMapToVisibleData() {
   if (!map || !window.google?.maps) return;
   const bounds = new google.maps.LatLngBounds();
   let count = 0;
-  [...filteredStores(), ...filteredFlyerApartments()].forEach((item) => {
-    if (!isValidCoordinate(item.lat, item.lng)) return;
+  [...visibleStorePlaces(), ...visibleFlyerPlaces()].forEach((item) => {
     bounds.extend({ lat: item.lat, lng: item.lng });
     count += 1;
   });
@@ -1311,6 +1318,14 @@ function focusStore(id) {
   map.setZoom(16);
   const marker = storeMarkers.find((candidate) => candidate.storeId === store.id);
   if (marker) openStoreInfo(store, marker);
+}
+
+function visibleStorePlaces() {
+  return filteredStores().filter((store) => isValidCoordinate(store.lat, store.lng));
+}
+
+function visibleFlyerPlaces() {
+  return filteredFlyerApartments().filter((apt) => isValidCoordinate(apt.lat, apt.lng));
 }
 
 function filteredStores() {
