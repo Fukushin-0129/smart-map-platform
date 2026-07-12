@@ -56,6 +56,7 @@ app.innerHTML = `
       </div>
 
       <p id="mapStatus" class="status map-status">Google Mapsを読み込み中です。</p>
+      <aside id="placeDetailPanel" class="place-detail-panel" aria-live="polite" hidden></aside>
     </section>
 
     <div id="drawerBackdrop" class="drawer-backdrop" hidden></div>
@@ -251,6 +252,7 @@ const elements = {
   createTwoPersonRouteButton: document.querySelector('#createTwoPersonRouteButton'),
   flyerRouteList: document.querySelector('#flyerRouteList'),
   flyerDetailPanel: document.querySelector('#flyerDetailPanel'),
+  placeDetailPanel: document.querySelector('#placeDetailPanel'),
   name: document.querySelector('#name'),
   categoryLayer: document.querySelector('#categoryLayer'),
   category: document.querySelector('#category'),
@@ -354,6 +356,7 @@ function bindEvents() {
     if (event.key === 'Escape') {
       closeManagementDrawer();
       closeAddMenu();
+      closePlaceDetail();
     }
   });
   document.querySelectorAll('[data-open-panel]').forEach((button) => {
@@ -1159,9 +1162,118 @@ function markerIconForStore(store) {
 }
 
 function openStoreInfo(store, marker) {
-  const photoGrid = renderInfoWindowPhotos(store.photos);
-  infoWindow.setContent(`<div class="info-window"><strong>${escapeHtml(store.name)}</strong><br>${escapeHtml(displayCategoryLayer(store))}<br>${escapeHtml(store.description || '説明なし')}${photoGrid}</div>`);
-  infoWindow.open({ anchor: marker, map });
+  openPlaceDetail(renderStoreDetailCard(store), store.name);
+  if (marker?.getPosition && map) map.panTo(marker.getPosition());
+}
+
+
+function openPlaceDetail(content, title = 'Place詳細') {
+  infoWindow?.close();
+  elements.flyerDetailPanel.hidden = true;
+  elements.placeDetailPanel.innerHTML = content;
+  elements.placeDetailPanel.hidden = false;
+  elements.placeDetailPanel.querySelector('[data-close-place-detail]')?.addEventListener('click', closePlaceDetail);
+  elements.placeDetailPanel.querySelectorAll('[data-detail-set-flyer-status]').forEach((button) => {
+    button.addEventListener('click', () => setFlyerStatusFromButton(button.dataset.flyerId, button.dataset.detailSetFlyerStatus));
+  });
+  elements.placeDetailPanel.querySelector('[data-place-sheet-handle]')?.addEventListener('click', () => {
+    elements.placeDetailPanel.classList.toggle('expanded');
+  });
+  elements.placeDetailPanel.setAttribute('aria-label', `${title}の詳細`);
+}
+
+function closePlaceDetail() {
+  elements.placeDetailPanel.hidden = true;
+  elements.placeDetailPanel.classList.remove('expanded');
+  elements.placeDetailPanel.innerHTML = '';
+}
+
+function renderStoreDetailCard(store) {
+  const rows = renderDetailRows([
+    ['住所', store.address],
+    ['カテゴリ', store.category],
+    ['レイヤー', store.layerName],
+    ['状態', store.status],
+    ['担当者', store.assignee],
+    ['評価', store.rating],
+    ['説明', store.description],
+    ['メモ', store.memo || store.note],
+    ['緯度', formatCoordinate(store.lat)],
+    ['経度', formatCoordinate(store.lng)],
+    ['更新日時', formatDateTime(store.updatedAt || store.createdAt)],
+  ]);
+  return renderPlaceDetailShell({
+    typeLabel: displayCategoryLayer(store),
+    title: store.name || '名称未設定',
+    summary: store.address || store.description || displayCategoryLayer(store),
+    body: `${rows}${renderDetailPhotos(store.photos)}`,
+  });
+}
+
+function renderFlyerDetailCard(apt) {
+  const rows = renderDetailRows([
+    ['住所', apt.address],
+    ['カテゴリ', FLYER_LAYER.name],
+    ['状態', apt.status],
+    ['担当者', apt.assignee],
+    ['物件名', apt.name],
+    ['戸数', apt.units ? `${apt.units}戸` : ''],
+    ['配布状況', apt.status],
+    ['配布日', apt.distributionDate],
+    ['配布枚数', apt.deliveredCount],
+    ['メモ', apt.memo],
+    ['緯度', formatCoordinate(apt.lat)],
+    ['経度', formatCoordinate(apt.lng)],
+    ['更新日時', formatDateTime(apt.updatedAt || apt.createdAt)],
+  ]);
+  const actions = FLYER_STATUSES.map((status) => `<button type="button" data-detail-set-flyer-status="${escapeHtml(status)}" data-flyer-id="${escapeHtml(apt.id)}" class="${status === apt.status ? 'primary' : ''}">${escapeHtml(status)}</button>`).join('');
+  return renderPlaceDetailShell({
+    typeLabel: FLYER_LAYER.name,
+    title: apt.name || '物件名未設定',
+    summary: [apt.address, apt.status, apt.assignee].filter(Boolean).join(' / '),
+    body: `${rows}${renderDetailPhotos(apt.photos)}<div class="place-detail-actions">${actions}</div>`,
+  });
+}
+
+function renderPlaceDetailShell({ typeLabel, title, summary, body }) {
+  return `
+    <div class="place-sheet-handle" data-place-sheet-handle aria-hidden="true"></div>
+    <div class="place-detail-header">
+      <div>
+        ${typeLabel ? `<p class="place-detail-eyebrow">${escapeHtml(typeLabel)}</p>` : ''}
+        <h2>${escapeHtml(title)}</h2>
+        ${summary ? `<p>${escapeHtml(summary)}</p>` : ''}
+      </div>
+      <button type="button" data-close-place-detail aria-label="詳細を閉じる">×</button>
+    </div>
+    <div class="place-detail-body">${body}</div>`;
+}
+
+function renderDetailRows(rows) {
+  const html = rows.filter(([, value]) => hasDetailValue(value)).map(([label, value]) => `
+    <div class="place-detail-row">
+      <dt>${escapeHtml(label)}</dt>
+      <dd>${escapeHtml(String(value))}</dd>
+    </div>`).join('');
+  return html ? `<dl class="place-detail-list">${html}</dl>` : '<p class="empty">表示できる詳細情報がありません。</p>';
+}
+
+function renderDetailPhotos(photos = []) {
+  return photos.length ? `<div class="place-detail-photos">${photos.slice(0, 6).map((photo) => `<img src="${escapeHtml(photo.dataUrl)}" alt="${escapeHtml(photo.name || '写真')}" />`).join('')}</div>` : '';
+}
+
+function hasDetailValue(value) {
+  return value !== undefined && value !== null && String(value).trim() !== '';
+}
+
+function formatCoordinate(value) {
+  return Number.isFinite(Number(value)) ? Number(value).toFixed(6) : '';
+}
+
+function formatDateTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('ja-JP');
 }
 
 function renderLayerList() {
@@ -1298,6 +1410,7 @@ function renderPhotoThumbnails(photos = []) {
 }
 
 function deleteStore(id) {
+  closePlaceDetail();
   stores = stores.filter((store) => store.id !== id);
   layers = layers.filter((layer) => countStoresInLayer(layer.id) > 0);
   saveStores(stores);
@@ -1587,7 +1700,7 @@ function updateFlyer(id, patch) {
   renderMarkers();
   const apt = flyerApartments.find((item) => item.id === id);
   const marker = flyerMarkers.find((item) => item.flyerId === id);
-  if (apt && marker && infoWindow?.getMap()) openFlyerInfo(apt, marker);
+  if (apt && marker && !elements.placeDetailPanel.hidden) openFlyerInfo(apt, marker);
 }
 function setFlyerStatusFromButton(id, status) {
   const apt = flyerApartments.find((item) => item.id === id);
@@ -1607,16 +1720,10 @@ function numberedMarkerSvg(color, label) {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 function openFlyerInfo(apt, marker) {
-  const content = renderFlyerDetailForm(apt, 'info');
-  infoWindow.setContent(`<div class="info-window flyer-info-window">${content}</div>`);
-  infoWindow.open({ anchor: marker, map });
-  google.maps.event.addListenerOnce(infoWindow, 'domready', () => bindFlyerDetailForm(document, apt.id, false));
-  if (window.matchMedia('(max-width: 560px)').matches) {
-    elements.flyerDetailPanel.hidden = false;
-    elements.flyerDetailPanel.innerHTML = renderFlyerDetailForm(apt, 'panel');
-    bindFlyerDetailForm(elements.flyerDetailPanel, apt.id, true);
-  }
+  openPlaceDetail(renderFlyerDetailCard(apt), apt.name);
+  if (marker?.getPosition && map) map.panTo(marker.getPosition());
 }
+
 
 function renderFlyerDetailForm(apt, scope) {
   return `
