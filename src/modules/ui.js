@@ -321,7 +321,6 @@ export async function initializeApp() {
 }
 
 
-
 let toastTimer;
 
 function showToast(message, variant = 'success') {
@@ -478,7 +477,6 @@ function bindEvents() {
     focusStore(store.id);
   });
 }
-
 
 
 async function importPhotoFiles(event) {
@@ -1202,7 +1200,6 @@ function openStoreInfo(store, marker) {
   infoWindow.open({ anchor: marker, map });
   renderPlaceDetailPanel('store', store);
 }
-
 
 
 function renderPlaceDetailPanel(type, item) {
