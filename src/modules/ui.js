@@ -23,151 +23,224 @@ let flyerRoutes = [];
 const app = document.querySelector('#app');
 
 app.innerHTML = `
-  <header class="hero">
-    <div>
-      <p class="eyebrow">Smart Map Platform</p>
-      <h1>サラダマップ風 店舗登録・検索アプリ</h1>
-      <p class="lead">Google Maps JavaScript APIで現在地取得、店舗登録、一覧表示、検索を行えます。</p>
-      <p class="api-help">APIキーはローカルでは <code>config.js</code>、Vercelでは環境変数 <code>GOOGLE_MAPS_API_KEY</code> に設定します。</p>
-    </div>
-    <button id="locateButton" class="primary">現在地を取得</button>
-  </header>
-
-  <main class="layout">
-    <aside class="panel controls" aria-label="店舗管理">
-      <section>
-        <h2>店舗登録</h2>
-        <form id="storeForm" class="form">
-          <label>店舗名<input id="name" name="name" required placeholder="例: Green Salad Tokyo" /></label>
-          <label>登録先カテゴリ／レイヤー<select id="categoryLayer" name="categoryLayer"></select></label>
-          <label>カテゴリ補足<input id="category" name="category" placeholder="例: サラダ / カフェ / テイクアウト" /></label>
-          <label>説明<textarea id="description" name="description" rows="3" placeholder="おすすめメニューや営業時間など"></textarea></label>
-          <div class="grid-two">
-            <label>緯度<input id="lat" name="lat" type="number" step="any" required /></label>
-            <label>経度<input id="lng" name="lng" type="number" step="any" required /></label>
-          </div>
-          <div class="button-row">
-            <button type="button" id="useCenterButton">地図中心を入力</button>
-            <button type="submit" class="primary">登録する</button>
-          </div>
-        </form>
-      </section>
-
-      <section>
-        <h2>今日行ったカフェを検索登録</h2>
-        <div class="place-search">
-          <label>店名・キーワード
-            <input id="placeSearchInput" placeholder="例: 東京駅 カフェ / 店名" />
-          </label>
-          <div class="button-row">
-            <button type="button" id="placeSearchButton" class="primary">候補を検索</button>
-            <button type="button" id="clearPlaceCandidatesButton">候補をクリア</button>
-          </div>
-          <p id="placeSearchStatus" class="import-status" aria-live="polite"></p>
-          <div id="placeCandidates" class="candidate-list"></div>
-        </div>
-      </section>
-
-      <section>
-        <h2>写真GPSでカフェ登録</h2>
-        <div class="photo-import">
-          <label>写真（複数選択可）
-            <input id="photoInput" type="file" accept="image/*,.jpg,.jpeg" multiple />
-          </label>
-          <p class="hint">JPEG写真のExif GPSから位置を読み取り、近くのカフェ・飲食店候補を検索します。候補を選ぶと写真付きで店舗データに登録します。GPS情報がない写真は未分類に保存します。</p>
-          <p id="photoStatus" class="import-status" aria-live="polite"></p>
-          <div id="photoReview" class="photo-review"></div>
-        </div>
-      </section>
-
-      <section>
-        <h2>KMLインポート</h2>
-        <div class="kml-import">
-          <label>Google My MapsのKMLファイル（複数選択可）
-            <input id="kmlInput" type="file" accept=".kml,application/vnd.google-earth.kml+xml,application/xml,text/xml" multiple />
-          </label>
-          <p class="hint">Google My Mapsから書き出した複数のKMLを一度に選ぶと、1ファイル=1レイヤーとして追加します。</p>
-          <p id="kmlStatus" class="import-status" aria-live="polite"></p>
-        </div>
-      </section>
-
-      <section>
-        <h2>CSVインポート</h2>
-        <div class="csv-import">
-          <label>配布済み一覧-表1.csv
-            <input id="csvInput" type="file" accept=".csv,text/csv" />
-          </label>
-          <p class="hint">タイトル行・集計行を含むCSVでも、「No.」「物件名」「エリア」から始まる見出し行を自動判定して読み込みます。</p>
-          <p id="csvStatus" class="import-status" aria-live="polite"></p>
-        </div>
-      </section>
-
-      <section>
-        <h2>担当者</h2>
-        <div class="assignee-grid">
-          ${Array.from({ length: 10 }, (_, index) => `<input id="assignee${index + 1}" placeholder="担当${index + 1}" />`).join('')}
-        </div>
-        <label>担当者で絞り込み<select id="assigneeFilter"></select></label>
-        <label>配布状況で絞り込み<select id="flyerStatusFilter"></select></label>
-        <label>配布日で絞り込み<input id="flyerDateFilter" type="date" /></label>
-        <div class="button-row quick-filter-row">
-          <button type="button" id="showUndeliveredButton">未配布のみ</button>
-          <button type="button" id="showDeliveredButton">配布済みのみ</button>
-        </div>
-        <button type="button" id="clearFlyerFiltersButton">絞り込み解除</button>
-      </section>
-
-      <section>
-        <div class="list-header">
-          <h2>KMLレイヤー</h2>
-          <span id="layerCount" class="badge">0件</span>
-        </div>
-        <div id="layerList" class="layer-list"></div>
-      </section>
-
-      <section>
-        <h2>店舗検索</h2>
-        <input id="searchInput" class="search" placeholder="店舗名・カテゴリ・説明で検索" />
-      </section>
-
-      <section>
-        <div class="list-header">
-          <h2>店舗一覧</h2>
-          <span id="count" class="badge">0件</span>
-        </div>
-        <div id="storeList" class="store-list"></div>
-      </section>
-
-      <section>
-        <div class="list-header">
-          <h2>チラシ配布一覧</h2>
-          <span id="flyerCount" class="badge">0件</span>
-        </div>
-        <div id="flyerStatusSummary" class="flyer-status-summary" aria-live="polite"></div>
-        <div class="flyer-legend"><span class="blue">未配布</span><span class="green">配布済み</span><span class="red">配布不可</span><span class="yellow">不在</span></div>
-        <button type="button" id="exportFlyerCsvButton" class="primary flyer-route-button">配布実績をCSV出力</button>
-        <button type="button" id="createTwoPersonRouteButton" class="primary flyer-route-button">2人でルート作成</button>
-        <div id="flyerRouteList" class="flyer-route-list"></div>
-        <div id="flyerList" class="store-list"></div>
-      </section>
-    </aside>
-
-    <section class="panel map-panel" aria-label="地図">
+  <main class="app-shell">
+    <section class="map-stage" aria-label="地図中心の通常画面">
       <div id="map" class="map">
         <div id="mapSetup" class="map-setup" hidden>
           <h2>Google Maps APIキーを設定してください</h2>
           <p><code>npm run init:config</code> を実行し、作成された <code>config.js</code> に取得済みのAPIキーを貼り付けてから再読み込みしてください。</p>
         </div>
       </div>
-      <p id="mapStatus" class="status">Google Mapsを読み込み中です。</p>
+
+      <div class="map-topbar" aria-label="地図検索">
+        <button type="button" id="menuButton" class="icon-button menu-button" aria-label="メニューを開く" aria-expanded="false">☰</button>
+        <label class="map-search-label">
+          <span class="visually-hidden">店舗検索</span>
+          <input id="searchInput" class="map-search-input" placeholder="店舗名・カテゴリ・説明で検索" autocomplete="off" />
+        </label>
+      </div>
+
+      <div id="searchResultsPanel" class="search-results-panel" hidden></div>
+      <aside id="placeDetailPanel" class="place-detail-panel" hidden></aside>
+
+      <div class="map-actions" aria-label="地図操作">
+        <button id="locateButton" class="map-action-button" type="button">現在地</button>
+        <div class="fab-group">
+          <button id="addFabButton" class="add-fab" type="button" aria-haspopup="true" aria-expanded="false">＋</button>
+          <div id="addFabMenu" class="add-fab-menu" hidden>
+            <button type="button" data-open-panel="store">店舗を登録</button>
+            <button type="button" data-locate-and-open="store">現在地から登録</button>
+            <button type="button" data-open-panel="photo">写真GPSから登録</button>
+            <button type="button" data-open-panel="csv">CSVインポート</button>
+          </div>
+        </div>
+      </div>
+
+      <p id="mapStatus" class="status map-status">Google Mapsを読み込み中です。</p>
     </section>
+
+    <div id="drawerBackdrop" class="drawer-backdrop" hidden></div>
+    <aside id="managementDrawer" class="management-drawer" aria-label="管理メニュー" aria-hidden="true">
+      <div class="drawer-header">
+        <div>
+          <p class="drawer-eyebrow">Smart Map Platform</p>
+          <h1 id="managementPanelTitle">レイヤー</h1>
+        </div>
+        <button type="button" id="closeDrawerButton" class="icon-button" aria-label="メニューを閉じる">×</button>
+      </div>
+
+      <nav class="drawer-menu" aria-label="管理機能">
+        <button type="button" data-open-panel="use-switch">プロジェクト／用途切替</button>
+        <button type="button" data-open-panel="layers">レイヤー</button>
+        <button type="button" data-open-panel="store">店舗登録</button>
+        <button type="button" data-open-panel="csv">CSVインポート</button>
+        <button type="button" data-open-panel="csv-export">CSVエクスポート</button>
+        <button type="button" data-open-panel="kml">KMLインポート</button>
+        <button type="button" data-open-panel="photo">写真GPS</button>
+        <button type="button" data-open-panel="assignees">担当者管理</button>
+        <button type="button" data-open-panel="flyer">チラシ配布管理</button>
+        <button type="button" data-open-panel="stores">データ一覧</button>
+        <button type="button" data-open-panel="settings">設定</button>
+      </nav>
+
+      <div class="drawer-content panel controls">
+        <section data-panel="use-switch">
+          <h2>プロジェクト／用途切替</h2>
+          <p class="hint">新しいProjectモデルは使わず、既存のサラダマップ店舗とチラシ配布レイヤーの表示切替として扱います。</p>
+          <div class="use-switch-list">
+            <label class="layer-card">
+              <input type="checkbox" data-toggle-layer="default-stores" />
+              <span class="layer-color" style="--layer-color: #16a34a"></span>
+              <span><strong>サラダマップ</strong><small>店舗・KML以外の通常地点</small></span>
+            </label>
+            <label class="layer-card">
+              <input type="checkbox" data-toggle-layer="flyer-apartments" />
+              <span class="layer-color" style="--layer-color: #2563eb"></span>
+              <span><strong>チラシ配布</strong><small>CSVから読み込んだ配布先</small></span>
+            </label>
+          </div>
+        </section>
+
+        <section data-panel="layers">
+          <div class="list-header">
+            <h2>KMLレイヤー</h2>
+            <span id="layerCount" class="badge">0件</span>
+          </div>
+          <div id="layerList" class="layer-list"></div>
+        </section>
+
+        <section data-panel="store">
+          <h2>店舗登録</h2>
+          <form id="storeForm" class="form">
+            <label>店舗名<input id="name" name="name" required placeholder="例: Green Salad Tokyo" /></label>
+            <label>登録先カテゴリ／レイヤー<select id="categoryLayer" name="categoryLayer"></select></label>
+            <label>カテゴリ補足<input id="category" name="category" placeholder="例: サラダ / カフェ / テイクアウト" /></label>
+            <label>説明<textarea id="description" name="description" rows="3" placeholder="おすすめメニューや営業時間など"></textarea></label>
+            <div class="grid-two">
+              <label>緯度<input id="lat" name="lat" type="number" step="any" required /></label>
+              <label>経度<input id="lng" name="lng" type="number" step="any" required /></label>
+            </div>
+            <div class="button-row">
+              <button type="button" id="useCenterButton">地図中心を入力</button>
+              <button type="submit" class="primary">登録する</button>
+            </div>
+          </form>
+        </section>
+
+        <section data-panel="photo">
+          <h2>写真GPSでカフェ登録</h2>
+          <div class="photo-import">
+            <label>写真（複数選択可）
+              <input id="photoInput" type="file" accept="image/*,.jpg,.jpeg" multiple />
+            </label>
+            <p class="hint">JPEG写真のExif GPSから位置を読み取り、近くのカフェ・飲食店候補を検索します。候補を選ぶと写真付きで店舗データに登録します。GPS情報がない写真は未分類に保存します。</p>
+            <p id="photoStatus" class="import-status" aria-live="polite"></p>
+            <div id="photoReview" class="photo-review"></div>
+          </div>
+
+          <hr class="panel-divider" />
+          <h2>今日行ったカフェを検索登録</h2>
+          <div class="place-search">
+            <label>店名・キーワード
+              <input id="placeSearchInput" placeholder="例: 東京駅 カフェ / 店名" />
+            </label>
+            <div class="button-row">
+              <button type="button" id="placeSearchButton" class="primary">候補を検索</button>
+              <button type="button" id="clearPlaceCandidatesButton">候補をクリア</button>
+            </div>
+            <p id="placeSearchStatus" class="import-status" aria-live="polite"></p>
+            <div id="placeCandidates" class="candidate-list"></div>
+          </div>
+        </section>
+
+        <section data-panel="kml">
+          <h2>KMLインポート</h2>
+          <div class="kml-import">
+            <label>Google My MapsのKMLファイル（複数選択可）
+              <input id="kmlInput" type="file" accept=".kml,application/vnd.google-earth.kml+xml,application/xml,text/xml" multiple />
+            </label>
+            <p class="hint">Google My Mapsから書き出した複数のKMLを一度に選ぶと、1ファイル=1レイヤーとして追加します。</p>
+            <p id="kmlStatus" class="import-status" aria-live="polite"></p>
+          </div>
+        </section>
+
+        <section data-panel="csv">
+          <h2>CSVインポート</h2>
+          <div class="csv-import">
+            <label>配布済み一覧-表1.csv
+              <input id="csvInput" type="file" accept=".csv,text/csv" />
+            </label>
+            <p class="hint">タイトル行・集計行を含むCSVでも、「No.」「物件名」「エリア」から始まる見出し行を自動判定して読み込みます。</p>
+            <p id="csvStatus" class="import-status" aria-live="polite"></p>
+          </div>
+        </section>
+
+        <section data-panel="csv-export">
+          <h2>CSVエクスポート</h2>
+          <p class="hint">既存データをUTF-8 BOM付きCSVで出力します。</p>
+          <button type="button" id="exportStoresCsvButton" class="flyer-route-button">店舗データをCSV出力</button>
+          <button type="button" id="exportFlyerCsvButton" class="primary flyer-route-button">配布実績をCSV出力</button>
+        </section>
+
+        <section data-panel="assignees">
+          <h2>担当者</h2>
+          <div class="assignee-grid">
+            ${Array.from({ length: 10 }, (_, index) => `<input id="assignee${index + 1}" placeholder="担当${index + 1}" />`).join('')}
+          </div>
+          <label>担当者で絞り込み<select id="assigneeFilter"></select></label>
+          <label>配布状況で絞り込み<select id="flyerStatusFilter"></select></label>
+          <label>配布日で絞り込み<input id="flyerDateFilter" type="date" /></label>
+          <div class="button-row quick-filter-row">
+            <button type="button" id="showUndeliveredButton">未配布のみ</button>
+            <button type="button" id="showDeliveredButton">配布済みのみ</button>
+          </div>
+          <button type="button" id="clearFlyerFiltersButton">絞り込み解除</button>
+        </section>
+
+        <section data-panel="flyer">
+          <div class="list-header">
+            <h2>チラシ配布一覧</h2>
+            <span id="flyerCount" class="badge">0件</span>
+          </div>
+          <div id="flyerStatusSummary" class="flyer-status-summary" aria-live="polite"></div>
+          <div class="flyer-legend"><span class="blue">未配布</span><span class="green">配布済み</span><span class="red">配布不可</span><span class="yellow">不在</span></div>
+          <button type="button" id="createTwoPersonRouteButton" class="primary flyer-route-button">2人でルート作成</button>
+          <div id="flyerRouteList" class="flyer-route-list"></div>
+          <div id="flyerList" class="store-list"></div>
+        </section>
+
+        <section data-panel="settings">
+          <h2>設定</h2>
+          <p class="empty">設定項目は今後の段階で整理します。既存のデータ保存、CSV、KML、写真GPS、チラシ配布の処理は変更していません。</p>
+        </section>
+
+        <section data-panel="stores">
+          <div class="list-header">
+            <h2>店舗一覧</h2>
+            <span id="count" class="badge">0件</span>
+          </div>
+          <div id="storeList" class="store-list"></div>
+        </section>
+      </div>
+    </aside>
   </main>
+  <div id="toast" class="toast" hidden></div>
   <div id="flyerDetailPanel" class="flyer-detail-panel" hidden></div>
 `;
 
 const elements = {
   mapStatus: document.querySelector('#mapStatus'),
   mapSetup: document.querySelector('#mapSetup'),
+  menuButton: document.querySelector('#menuButton'),
+  closeDrawerButton: document.querySelector('#closeDrawerButton'),
+  drawerBackdrop: document.querySelector('#drawerBackdrop'),
+  managementDrawer: document.querySelector('#managementDrawer'),
+  managementPanelTitle: document.querySelector('#managementPanelTitle'),
+  addFabButton: document.querySelector('#addFabButton'),
+  addFabMenu: document.querySelector('#addFabMenu'),
+  searchResultsPanel: document.querySelector('#searchResultsPanel'),
+  placeDetailPanel: document.querySelector('#placeDetailPanel'),
+  toast: document.querySelector('#toast'),
   locateButton: document.querySelector('#locateButton'),
   storeForm: document.querySelector('#storeForm'),
   useCenterButton: document.querySelector('#useCenterButton'),
@@ -188,6 +261,7 @@ const elements = {
   showUndeliveredButton: document.querySelector('#showUndeliveredButton'),
   showDeliveredButton: document.querySelector('#showDeliveredButton'),
   clearFlyerFiltersButton: document.querySelector('#clearFlyerFiltersButton'),
+  exportStoresCsvButton: document.querySelector('#exportStoresCsvButton'),
   exportFlyerCsvButton: document.querySelector('#exportFlyerCsvButton'),
   assigneeInputs: Array.from({ length: 10 }, (_, index) => document.querySelector(`#assignee${index + 1}`)),
   kmlInput: document.querySelector('#kmlInput'),
@@ -238,7 +312,7 @@ export async function initializeApp() {
     renderMarkers();
     fitMapToVisibleData();
     elements.mapSetup.hidden = true;
-    elements.mapStatus.textContent = 'Google Mapを表示しました。地図上をクリックすると登録フォームに緯度・経度を入力できます。';
+    showToast('Google Mapを表示しました。');
   } catch (error) {
     elements.mapStatus.textContent = error.message;
     elements.mapStatus.classList.add('error');
@@ -246,7 +320,99 @@ export async function initializeApp() {
   }
 }
 
+
+
+let toastTimer;
+
+function showToast(message, variant = 'success') {
+  elements.toast.textContent = message;
+  elements.toast.dataset.variant = variant;
+  elements.toast.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { elements.toast.hidden = true; }, 3200);
+}
+
+function renderUseSwitchControls() {
+  document.querySelectorAll('[data-toggle-layer="default-stores"]').forEach((checkbox) => { checkbox.checked = isLayerVisible('default-stores'); });
+  document.querySelectorAll(`[data-toggle-layer="${FLYER_LAYER.id}"]`).forEach((checkbox) => { checkbox.checked = isLayerVisible(FLYER_LAYER.id); });
+}
+
+const panelTitles = {
+  'use-switch': 'プロジェクト／用途切替',
+  layers: 'レイヤー',
+  store: '店舗登録',
+  csv: 'CSVインポート',
+  'csv-export': 'CSVエクスポート',
+  kml: 'KMLインポート',
+  photo: '写真GPS',
+  assignees: '担当者管理',
+  flyer: 'チラシ配布管理',
+  settings: '設定',
+  stores: 'データ一覧',
+};
+
+function openManagementDrawer(panelName = 'layers') {
+  setActivePanel(panelName);
+  elements.managementDrawer.classList.add('open');
+  elements.managementDrawer.setAttribute('aria-hidden', 'false');
+  elements.drawerBackdrop.hidden = false;
+  elements.menuButton.setAttribute('aria-expanded', 'true');
+}
+
+function closeManagementDrawer() {
+  elements.managementDrawer.classList.remove('open');
+  elements.managementDrawer.setAttribute('aria-hidden', 'true');
+  elements.drawerBackdrop.hidden = true;
+  elements.menuButton.setAttribute('aria-expanded', 'false');
+}
+
+function setActivePanel(panelName) {
+  const target = panelTitles[panelName] ? panelName : 'layers';
+  elements.managementPanelTitle.textContent = panelTitles[target];
+  document.querySelectorAll('[data-panel]').forEach((panel) => {
+    panel.hidden = panel.dataset.panel !== target;
+  });
+  document.querySelectorAll('.drawer-menu [data-open-panel]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.openPanel === target);
+  });
+  renderUseSwitchControls();
+}
+
+function toggleAddMenu() {
+  const nextHidden = !elements.addFabMenu.hidden;
+  elements.addFabMenu.hidden = nextHidden;
+  elements.addFabButton.setAttribute('aria-expanded', String(!nextHidden));
+}
+
+function closeAddMenu() {
+  elements.addFabMenu.hidden = true;
+  elements.addFabButton.setAttribute('aria-expanded', 'false');
+}
+
 function bindEvents() {
+  elements.menuButton.addEventListener('click', () => openManagementDrawer('use-switch'));
+  elements.closeDrawerButton.addEventListener('click', closeManagementDrawer);
+  elements.drawerBackdrop.addEventListener('click', closeManagementDrawer);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      closeManagementDrawer();
+      closeAddMenu();
+    }
+  });
+  document.querySelectorAll('[data-open-panel]').forEach((button) => {
+    button.addEventListener('click', () => {
+      openManagementDrawer(button.dataset.openPanel);
+      closeAddMenu();
+    });
+  });
+  document.querySelectorAll('[data-locate-and-open]').forEach((button) => {
+    button.addEventListener('click', () => {
+      locateUser();
+      openManagementDrawer(button.dataset.locateAndOpen);
+      closeAddMenu();
+    });
+  });
+  elements.addFabButton.addEventListener('click', () => toggleAddMenu());
   elements.locateButton.addEventListener('click', locateUser);
   elements.useCenterButton.addEventListener('click', () => {
     if (!map) return;
@@ -257,6 +423,7 @@ function bindEvents() {
     renderStoreList();
     renderMarkers();
   });
+  elements.searchInput.addEventListener('focus', () => renderSearchResults());
   elements.photoInput.addEventListener('change', importPhotoFiles);
   elements.placeSearchButton.addEventListener('click', searchPlacesByKeyword);
   elements.placeSearchInput.addEventListener('keydown', (event) => {
@@ -272,6 +439,7 @@ function bindEvents() {
   });
   elements.csvInput.addEventListener('change', importCsvFile);
   elements.createTwoPersonRouteButton.addEventListener('click', createTwoPersonRoutes);
+  elements.exportStoresCsvButton.addEventListener('click', exportStoresCsv);
   elements.exportFlyerCsvButton.addEventListener('click', exportFlyerCsv);
   const rerenderFlyerFilters = () => { flyerRoutes = []; renderFlyerRoutes(); renderFlyerList(); renderMarkers(); fitMapToVisibleData(); };
   elements.assigneeFilter.addEventListener('change', rerenderFlyerFilters);
@@ -336,6 +504,7 @@ async function importPhotoFiles(event) {
     fitMapToVisibleData();
   } finally {
     elements.photoStatus.textContent = formatPhotoImportStatus(stats, results);
+    showToast(stats.errors.length ? '写真GPSの読み込みが完了しました（一部エラーあり）。' : '写真GPSの読み込みが完了しました。', stats.errors.length ? 'warning' : 'success');
     event.target.value = '';
   }
 }
@@ -832,6 +1001,7 @@ async function importKmlFiles(event) {
     importedStores.length ? `${importedLayers.length}レイヤー、${importedStores.length}件の店舗を追加しました。` : '店舗は追加されませんでした。',
     ...errors,
   ].join(' ');
+  showToast(importedStores.length ? `${importedStores.length}件のKML地点を読み込みました。` : 'KMLから追加できる地点がありませんでした。', errors.length ? 'warning' : 'success');
   event.target.value = '';
 }
 
@@ -951,7 +1121,7 @@ function locateUser() {
     alert('このブラウザは現在地取得に対応していません。');
     return;
   }
-  elements.mapStatus.textContent = '現在地を取得しています...';
+  showToast('現在地を取得しています...');
   navigator.geolocation.getCurrentPosition(
     (position) => {
       currentPosition = { lat: position.coords.latitude, lng: position.coords.longitude };
@@ -967,11 +1137,10 @@ function locateUser() {
           icon: { path: google.maps.SymbolPath.CIRCLE, scale: 9, fillColor: '#2563eb', fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 3 },
         });
       }
-      elements.mapStatus.textContent = '現在地を取得しました。緯度・経度を店舗登録に利用できます。';
+      showToast('現在地を取得しました。');
     },
     () => {
-      elements.mapStatus.textContent = '現在地を取得できませんでした。ブラウザの位置情報許可を確認してください。';
-      elements.mapStatus.classList.add('error');
+      showToast('現在地を取得できませんでした。ブラウザの位置情報許可を確認してください。', 'error');
     },
     { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
   );
@@ -1010,8 +1179,8 @@ function fitMapToVisibleData() {
     count += 1;
   });
   if (!count) {
-    map.setCenter({ lat: 20, lng: 0 });
-    map.setZoom(2);
+    map.setCenter({ lat: 34.7855, lng: 135.5196 });
+    map.setZoom(11);
     return;
   }
   if (count === 1) {
@@ -1031,6 +1200,46 @@ function openStoreInfo(store, marker) {
   const photoGrid = renderInfoWindowPhotos(store.photos);
   infoWindow.setContent(`<div class="info-window"><strong>${escapeHtml(store.name)}</strong><br>${escapeHtml(displayCategoryLayer(store))}<br>${escapeHtml(store.description || '説明なし')}${photoGrid}</div>`);
   infoWindow.open({ anchor: marker, map });
+  renderPlaceDetailPanel('store', store);
+}
+
+
+
+function renderPlaceDetailPanel(type, item) {
+  elements.placeDetailPanel.hidden = false;
+  if (type === 'flyer') {
+    elements.placeDetailPanel.innerHTML = renderFlyerDetailCard(item);
+    elements.placeDetailPanel.querySelector('[data-close-place-detail]')?.addEventListener('click', () => { elements.placeDetailPanel.hidden = true; });
+    elements.placeDetailPanel.querySelectorAll('[data-detail-flyer-status]').forEach((button) => {
+      button.addEventListener('click', () => setFlyerStatusFromButton(item.id, button.dataset.detailFlyerStatus));
+    });
+    return;
+  }
+
+  elements.placeDetailPanel.innerHTML = `
+    <div class="place-detail-header"><strong>${escapeHtml(item.name)}</strong><button type="button" data-close-place-detail>×</button></div>
+    <p class="category">${escapeHtml(displayCategoryLayer(item))}</p>
+    ${item.address ? `<p>${escapeHtml(item.address)}</p>` : ''}
+    ${item.description ? `<p>${escapeHtml(item.description)}</p>` : ''}
+    ${item.layerName ? `<p class="layer-badge"><span style="--layer-color: ${escapeHtml(item.layerColor)}"></span>${escapeHtml(item.layerName)}</p>` : ''}
+    ${renderPhotoThumbnails(item.photos)}
+    <p class="coords">${Number(item.lat).toFixed(6)}, ${Number(item.lng).toFixed(6)}</p>`;
+  elements.placeDetailPanel.querySelector('[data-close-place-detail]')?.addEventListener('click', () => { elements.placeDetailPanel.hidden = true; });
+}
+
+function renderFlyerDetailCard(apt) {
+  return `
+    <div class="place-detail-header"><strong>${escapeHtml(apt.name)}</strong><button type="button" data-close-place-detail>×</button></div>
+    <p class="category">${escapeHtml(FLYER_LAYER.name)} / ${escapeHtml(apt.status)}</p>
+    ${apt.address ? `<p>${escapeHtml(apt.address)}</p>` : ''}
+    <p>${escapeHtml([apt.area, apt.type, apt.schoolDistrict, apt.units ? `${apt.units}戸` : ''].filter(Boolean).join(' / '))}</p>
+    <p>配布日: ${escapeHtml(apt.distributionDate || '未設定')} / 担当: ${escapeHtml(apt.assignee || '未設定')}</p>
+    ${apt.memo ? `<p>${escapeHtml(apt.memo)}</p>` : ''}
+    ${renderPhotoThumbnails(apt.photos)}
+    <div class="flyer-status-buttons detail-status-buttons">
+      ${FLYER_STATUSES.map((status) => `<button type="button" data-detail-flyer-status="${escapeHtml(status)}" class="${status === apt.status ? 'primary' : ''}">${escapeHtml(status)}</button>`).join('')}
+    </div>
+    <p class="coords">${Number(apt.lat).toFixed(6)}, ${Number(apt.lng).toFixed(6)}</p>`;
 }
 
 function renderLayerList() {
@@ -1046,8 +1255,9 @@ function renderLayerList() {
       </label>`).join('')
     : '<p class="empty">KMLやチラシ配布CSVを読み込むと、ここでレイヤーの表示/非表示を切り替えられます。</p>';
 
-  elements.layerList.querySelectorAll('[data-toggle-layer]').forEach((checkbox) => {
-    checkbox.addEventListener('change', () => toggleLayer(checkbox.dataset.toggleLayer, checkbox.checked));
+  document.querySelectorAll('[data-toggle-layer]').forEach((checkbox) => {
+    checkbox.checked = isLayerVisible(checkbox.dataset.toggleLayer);
+    checkbox.onchange = () => toggleLayer(checkbox.dataset.toggleLayer, checkbox.checked);
   });
 }
 
@@ -1066,6 +1276,7 @@ function toggleLayer(layerId, visible) {
     saveLayers(layers);
   }
   saveLayerVisibility(layerVisibility);
+  showToast(visible ? 'レイヤーを表示しました。' : 'レイヤーを非表示にしました。');
   renderLayerList();
   renderStoreList();
   renderFlyerList();
@@ -1117,6 +1328,46 @@ function renderStoreList() {
   elements.storeList.querySelectorAll('[data-delete-store]').forEach((button) => {
     button.addEventListener('click', () => deleteStore(button.dataset.deleteStore));
   });
+
+  renderSearchResults(visibleStores);
+}
+
+function renderSearchResults(visibleStores = filteredStores()) {
+  const keyword = elements.searchInput.value.trim();
+  if (!keyword) {
+    elements.searchResultsPanel.hidden = true;
+    elements.searchResultsPanel.innerHTML = '';
+    return;
+  }
+
+  const storeResults = visibleStores.map((store) => ({ type: 'store', id: store.id, name: store.name, detail: displayCategoryLayer(store) }));
+  const flyerResults = filteredFlyerApartments().map((apt) => ({ type: 'flyer', id: apt.id, name: apt.name, detail: `${FLYER_LAYER.name} / ${apt.status}${apt.assignee ? ` / ${apt.assignee}` : ''}` }));
+  const results = [...storeResults, ...flyerResults];
+  const previewResults = results.slice(0, 7);
+  elements.searchResultsPanel.hidden = false;
+  elements.searchResultsPanel.innerHTML = previewResults.length
+    ? `<div class="search-results-header"><strong>${escapeHtml(keyword)}</strong><span>${results.length}件</span></div>
+      ${previewResults.map((item) => `
+        <button type="button" class="search-result-item" data-focus-${item.type}="${escapeHtml(item.id)}">
+          <span>${escapeHtml(item.name)}</span>
+          <small>${escapeHtml(item.detail)}</small>
+        </button>`).join('')}
+      <button type="button" class="search-results-more" data-open-panel="stores">データ一覧で見る</button>`
+    : '<p class="empty">条件に一致するデータがありません。</p>';
+
+  elements.searchResultsPanel.querySelectorAll('[data-focus-store]').forEach((button) => {
+    button.addEventListener('click', () => {
+      focusStore(button.dataset.focusStore);
+      elements.searchResultsPanel.hidden = true;
+    });
+  });
+  elements.searchResultsPanel.querySelectorAll('[data-focus-flyer]').forEach((button) => {
+    button.addEventListener('click', () => {
+      focusFlyer(button.dataset.focusFlyer);
+      elements.searchResultsPanel.hidden = true;
+    });
+  });
+  elements.searchResultsPanel.querySelector('[data-open-panel="stores"]')?.addEventListener('click', () => openManagementDrawer('stores'));
 }
 
 function displayCategoryLayer(store) {
@@ -1184,6 +1435,7 @@ function renderAssignees() {
 function updateAssignee(index, value) {
   flyerAssignees[index] = value.trim() || DEFAULT_ASSIGNEES[index] || '';
   saveFlyerAssignees(flyerAssignees);
+  showToast('担当者を保存しました。');
   renderAssignees();
   renderFlyerList();
 }
@@ -1194,16 +1446,30 @@ async function importCsvFile(event) {
   elements.csvStatus.textContent = 'CSVを読み込んでいます...';
   try {
     const rows = parseCsv(await file.text());
-    const imported = rowsToFlyerApartments(rows);
-    flyerApartments = imported;
-    saveFlyerApartments(flyerApartments);
-    renderLayerList();
-    renderFlyerList();
-    renderMarkers();
-    fitMapToVisibleData();
-    elements.csvStatus.textContent = `${imported.length}件を「チラシ配布」レイヤーとして読み込みました。保存済み実績は同じ物件に引き継ぎました。`;
+    try {
+      const imported = rowsToFlyerApartments(rows);
+      flyerApartments = imported;
+      saveFlyerApartments(flyerApartments);
+      renderLayerList();
+      renderFlyerList();
+      renderMarkers();
+      fitMapToVisibleData();
+      elements.csvStatus.textContent = `${imported.length}件を「チラシ配布」レイヤーとして読み込みました。保存済み実績は同じ物件に引き継ぎました。`;
+      showToast(`${imported.length}件のチラシ配布CSVを読み込みました。`);
+    } catch (flyerError) {
+      const importedStores = rowsToStores(rows);
+      stores = [...importedStores, ...stores];
+      saveStores(stores);
+      renderLayerList();
+      renderStoreList();
+      renderMarkers();
+      fitMapToVisibleData();
+      elements.csvStatus.textContent = `${importedStores.length}件を店舗データとして読み込みました。`;
+      showToast(`${importedStores.length}件の店舗CSVを読み込みました。`);
+    }
   } catch (error) {
     elements.csvStatus.textContent = error.message || 'CSVの読み込みに失敗しました。';
+    showToast(elements.csvStatus.textContent, 'error');
   } finally {
     event.target.value = '';
   }
@@ -1225,6 +1491,38 @@ function parseCsv(text) {
   }
   if (value || row.length) { row.push(value); rows.push(row); }
   return rows.filter((r) => r.some((cell) => cell.trim()));
+}
+
+function rowsToStores(rows) {
+  const headerIndex = rows.findIndex((row) => row.some((cell) => ['店舗名', '名前', '施設名', 'Place Name', 'name'].includes(cell.trim().replace(/^\ufeff/, ''))));
+  if (headerIndex < 0) throw new Error('店舗CSVまたはチラシ配布CSVとして読み込める見出し行が見つかりませんでした。');
+  const headers = rows[headerIndex].map((h) => h.trim().replace(/^\ufeff/, ''));
+  const indexOf = (...names) => names.map((name) => headers.indexOf(name)).find((index) => index >= 0) ?? -1;
+  const getFrom = (row, ...names) => {
+    const index = indexOf(...names);
+    return index >= 0 ? row[index]?.trim() || '' : '';
+  };
+  const importedAt = new Date().toISOString();
+  const imported = rows.slice(headerIndex + 1).map((row) => {
+    const name = getFrom(row, '店舗名', '名前', '施設名', 'Place Name', 'name');
+    const lat = Number(getFrom(row, '緯度', 'lat', 'latitude'));
+    const lng = Number(getFrom(row, '経度', 'lng', 'longitude'));
+    if (!name || !isValidCoordinate(lat, lng)) return null;
+    return {
+      id: crypto.randomUUID(),
+      name,
+      category: getFrom(row, 'カテゴリ', '分類', '種別', 'category') || '未分類',
+      description: getFrom(row, '説明', 'メモ', '備考', 'note', 'description'),
+      address: getFrom(row, '住所', '所在地', 'Address', 'address'),
+      lat,
+      lng,
+      createdAt: importedAt,
+      photos: [],
+    };
+  }).filter(Boolean);
+  if (!imported.length) throw new Error('緯度・経度を持つ店舗行が見つかりませんでした。');
+  const importedKeys = new Set(imported.map((store) => `${store.name}|${Number(store.lat).toFixed(6)}|${Number(store.lng).toFixed(6)}`));
+  return [...imported, ...stores.filter((store) => !importedKeys.has(`${store.name}|${Number(store.lat).toFixed(6)}|${Number(store.lng).toFixed(6)}`))];
 }
 
 function rowsToFlyerApartments(rows) {
@@ -1417,6 +1715,8 @@ function updateFlyer(id, patch) {
   renderMarkers();
   const apt = flyerApartments.find((item) => item.id === id);
   const marker = flyerMarkers.find((item) => item.flyerId === id);
+  if (apt && !elements.placeDetailPanel.hidden) renderPlaceDetailPanel('flyer', apt);
+  showToast('チラシ配布状態を保存しました。');
   if (apt && marker && infoWindow?.getMap()) openFlyerInfo(apt, marker);
 }
 function setFlyerStatusFromButton(id, status) {
@@ -1440,6 +1740,7 @@ function openFlyerInfo(apt, marker) {
   const content = renderFlyerDetailForm(apt, 'info');
   infoWindow.setContent(`<div class="info-window flyer-info-window">${content}</div>`);
   infoWindow.open({ anchor: marker, map });
+  renderPlaceDetailPanel('flyer', apt);
   google.maps.event.addListenerOnce(infoWindow, 'domready', () => bindFlyerDetailForm(document, apt.id, false));
   if (window.matchMedia('(max-width: 560px)').matches) {
     elements.flyerDetailPanel.hidden = false;
@@ -1492,6 +1793,22 @@ function bindFlyerDetailForm(root, id, closeOnSave) {
   });
 }
 
+function exportStoresCsv() {
+  const headers = ['店舗名', 'カテゴリ', '説明', '住所', '緯度', '経度', 'レイヤー', '作成日時'];
+  const rows = filteredStores().map((store) => [store.name, store.category, store.description, store.address, store.lat, store.lng, store.layerName, store.createdAt]);
+  const csv = [headers, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n');
+  const blob = new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `stores-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  showToast(`${rows.length}件の店舗CSVを出力しました。`);
+}
+
 function exportFlyerCsv() {
   const headers = ['No.', '物件名', 'エリア', '種別', '小学校区', '戸数', '配布状況', '配布日', '担当者', '配布枚数', 'メモ', '緯度', '経度'];
   const rows = filteredFlyerApartments().map((apt) => [apt.no, apt.name, apt.area, apt.type, apt.schoolDistrict, apt.units, apt.status, apt.distributionDate, apt.assignee, apt.deliveredCount, apt.memo, apt.lat, apt.lng]);
@@ -1506,6 +1823,7 @@ function exportFlyerCsv() {
   link.remove();
   URL.revokeObjectURL(url);
   elements.csvStatus.textContent = `${rows.length}件の配布実績CSVを出力しました。`;
+  showToast(`${rows.length}件の配布実績CSVを出力しました。`);
 }
 
 function csvCell(value) {
