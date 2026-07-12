@@ -1190,17 +1190,14 @@ function closePlaceDetail() {
 
 function renderStoreDetailCard(store) {
   const rows = renderDetailRows([
+    ['名称', store.name],
     ['住所', store.address],
     ['カテゴリ', store.category],
-    ['レイヤー', store.layerName],
     ['状態', store.status],
     ['担当者', store.assignee],
+    ['メモ', store.memo || store.note],
     ['評価', store.rating],
     ['説明', store.description],
-    ['メモ', store.memo || store.note],
-    ['緯度', formatCoordinate(store.lat)],
-    ['経度', formatCoordinate(store.lng)],
-    ['更新日時', formatDateTime(store.updatedAt || store.createdAt)],
   ]);
   return renderPlaceDetailShell({
     typeLabel: displayCategoryLayer(store),
@@ -1212,26 +1209,22 @@ function renderStoreDetailCard(store) {
 
 function renderFlyerDetailCard(apt) {
   const rows = renderDetailRows([
+    ['名称', apt.name],
     ['住所', apt.address],
     ['カテゴリ', FLYER_LAYER.name],
     ['状態', apt.status],
     ['担当者', apt.assignee],
-    ['物件名', apt.name],
+    ['メモ', apt.memo],
     ['戸数', apt.units ? `${apt.units}戸` : ''],
     ['配布状況', apt.status],
     ['配布日', apt.distributionDate],
     ['配布枚数', apt.deliveredCount],
-    ['メモ', apt.memo],
-    ['緯度', formatCoordinate(apt.lat)],
-    ['経度', formatCoordinate(apt.lng)],
-    ['更新日時', formatDateTime(apt.updatedAt || apt.createdAt)],
   ]);
-  const actions = FLYER_STATUSES.map((status) => `<button type="button" data-detail-set-flyer-status="${escapeHtml(status)}" data-flyer-id="${escapeHtml(apt.id)}" class="${status === apt.status ? 'primary' : ''}">${escapeHtml(status)}</button>`).join('');
   return renderPlaceDetailShell({
     typeLabel: FLYER_LAYER.name,
     title: apt.name || '物件名未設定',
     summary: [apt.address, apt.status, apt.assignee].filter(Boolean).join(' / '),
-    body: `${rows}${renderDetailPhotos(apt.photos)}<div class="place-detail-actions">${actions}</div>`,
+    body: rows,
   });
 }
 
