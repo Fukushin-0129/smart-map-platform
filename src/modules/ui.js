@@ -1115,9 +1115,11 @@ function renderMarkers() {
       map,
       title: store.name,
       icon: markerIconForStore(store),
+      clickable: true,
+      optimized: false,
     });
     marker.storeId = store.id;
-    marker.addListener('click', () => {
+    bindPlaceMarkerClick(marker, () => {
       const latestStore = stores.find((item) => item.id === marker.storeId) || store;
       openStoreInfo(latestStore, marker);
     });
@@ -1125,14 +1127,35 @@ function renderMarkers() {
   });
 
   flyerMarkers = visibleFlyerPlaces().map((apt) => {
-    const marker = new google.maps.Marker({ position: { lat: apt.lat, lng: apt.lng }, map, title: apt.name, icon: markerIconForFlyer(apt) });
+    const marker = new google.maps.Marker({
+      position: { lat: apt.lat, lng: apt.lng },
+      map,
+      title: apt.name,
+      icon: markerIconForFlyer(apt),
+      clickable: true,
+      optimized: false,
+    });
     marker.flyerId = apt.id;
-    marker.addListener('click', () => {
+    bindPlaceMarkerClick(marker, () => {
       const latestApartment = flyerApartments.find((item) => item.id === marker.flyerId) || apt;
       openFlyerInfo(latestApartment, marker);
     });
     return marker;
   });
+}
+
+function bindPlaceMarkerClick(marker, openDetail) {
+  let lastOpenedAt = 0;
+  const handleOpen = (event) => {
+    event?.domEvent?.stopPropagation?.();
+    event?.domEvent?.preventDefault?.();
+    const now = Date.now();
+    if (now - lastOpenedAt < 250) return;
+    lastOpenedAt = now;
+    openDetail();
+  };
+  marker.addListener('click', handleOpen);
+  marker.addListener('mouseup', handleOpen);
 }
 
 function fitMapToVisibleData() {
@@ -1169,7 +1192,10 @@ function openStoreInfo(store, marker) {
 
 function openPlaceDetail(content, title = 'Place詳細') {
   infoWindow?.close();
+  closeAddMenu();
+  elements.searchResultsPanel.hidden = true;
   elements.flyerDetailPanel.hidden = true;
+  elements.placeDetailPanel.classList.remove('expanded');
   elements.placeDetailPanel.innerHTML = content;
   elements.placeDetailPanel.hidden = false;
   elements.placeDetailPanel.querySelector('[data-close-place-detail]')?.addEventListener('click', closePlaceDetail);
