@@ -44,12 +44,14 @@ app.innerHTML = `
       <aside id="placeDetailPanel" class="place-detail-panel" hidden></aside>
 
       <div class="map-actions" aria-label="地図操作">
+        <button id="layerButton" class="map-action-button" type="button">レイヤー</button>
         <button id="locateButton" class="map-action-button" type="button">現在地</button>
         <div class="fab-group">
           <button id="addFabButton" class="add-fab" type="button" aria-haspopup="true" aria-expanded="false">＋</button>
           <div id="addFabMenu" class="add-fab-menu" hidden>
             <button type="button" data-open-panel="store">店舗を登録</button>
             <button type="button" data-locate-and-open="store">現在地から登録</button>
+            <button type="button" data-center-and-open="store">地図中心を登録</button>
             <button type="button" data-open-panel="photo">写真GPSから登録</button>
             <button type="button" data-open-panel="csv">CSVインポート</button>
           </div>
@@ -238,6 +240,7 @@ const elements = {
   managementPanelTitle: document.querySelector('#managementPanelTitle'),
   addFabButton: document.querySelector('#addFabButton'),
   addFabMenu: document.querySelector('#addFabMenu'),
+  layerButton: document.querySelector('#layerButton'),
   searchResultsPanel: document.querySelector('#searchResultsPanel'),
   placeDetailPanel: document.querySelector('#placeDetailPanel'),
   toast: document.querySelector('#toast'),
@@ -319,6 +322,7 @@ export async function initializeApp() {
     elements.mapSetup.hidden = false;
   }
 }
+
 
 
 let toastTimer;
@@ -411,6 +415,17 @@ function bindEvents() {
       closeAddMenu();
     });
   });
+  document.querySelectorAll('[data-center-and-open]').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (map) {
+        const center = map.getCenter();
+        fillCoordinates(center.lat(), center.lng());
+      }
+      openManagementDrawer(button.dataset.centerAndOpen);
+      closeAddMenu();
+    });
+  });
+  elements.layerButton.addEventListener('click', () => openManagementDrawer('layers'));
   elements.addFabButton.addEventListener('click', () => toggleAddMenu());
   elements.locateButton.addEventListener('click', locateUser);
   elements.useCenterButton.addEventListener('click', () => {
@@ -477,6 +492,7 @@ function bindEvents() {
     focusStore(store.id);
   });
 }
+
 
 
 async function importPhotoFiles(event) {
@@ -1200,6 +1216,7 @@ function openStoreInfo(store, marker) {
   infoWindow.open({ anchor: marker, map });
   renderPlaceDetailPanel('store', store);
 }
+
 
 
 function renderPlaceDetailPanel(type, item) {
