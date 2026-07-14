@@ -1,7 +1,8 @@
 import { FLYER_LAYER } from './constants.js';
 
-const SUPABASE_URL = window.SMART_MAP_SUPABASE_URL || new URLSearchParams(window.location.search).get('supabaseUrl') || '';
-const SUPABASE_ANON_KEY = window.SMART_MAP_SUPABASE_ANON_KEY || new URLSearchParams(window.location.search).get('supabaseAnonKey') || '';
+const importMetaEnv = import.meta.env || {};
+const SUPABASE_URL = importMetaEnv.VITE_SUPABASE_URL || window.SMART_MAP_SUPABASE_URL || '';
+const SUPABASE_ANON_KEY = importMetaEnv.VITE_SUPABASE_ANON_KEY || window.SMART_MAP_SUPABASE_ANON_KEY || '';
 const TABLE = 'flyer_places';
 
 export function isSupabaseConfigured() {
@@ -25,8 +26,9 @@ export async function loadFlyerPlacesFromSupabase() {
 
 export async function saveFlyerPlacesToSupabase(flyerApartments) {
   if (!isSupabaseConfigured()) return { ok: false, reason: 'Supabase未設定' };
+  const rows = flyerApartments.map(flyerApartmentToRow);
+  if (!rows.length) return { ok: true, reason: '' };
   try {
-    const rows = flyerApartments.map(flyerApartmentToRow);
     const response = await fetch(`${normalizeUrl(SUPABASE_URL)}/rest/v1/${TABLE}?on_conflict=id`, {
       method: 'POST',
       headers: { ...supabaseHeaders(), Prefer: 'resolution=merge-duplicates' },
@@ -41,16 +43,10 @@ export async function saveFlyerPlacesToSupabase(flyerApartments) {
 }
 
 function supabaseHeaders() {
-  return {
-    apikey: SUPABASE_ANON_KEY,
-    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-    'Content-Type': 'application/json',
-  };
+  return { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' };
 }
 
-function normalizeUrl(url) {
-  return url.replace(/\/$/, '');
-}
+function normalizeUrl(url) { return url.replace(/\/$/, ''); }
 
 function rowToFlyerApartment(row) {
   return {
@@ -86,6 +82,6 @@ function flyerApartmentToRow(apt) {
     quantity: apt.deliveredCount === '' || apt.deliveredCount === undefined || apt.deliveredCount === null ? null : Number(apt.deliveredCount),
     memo: apt.memo || '',
     created_at: apt.createdAt || now,
-    updated_at: now,
+    updated_at: apt.updatedAt || now,
   };
 }

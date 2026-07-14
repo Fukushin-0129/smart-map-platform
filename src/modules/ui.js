@@ -1,5 +1,5 @@
 import { CANDIDATE_STORE_METERS, DEFAULT_ASSIGNEES, DEFAULT_CENTER, DEFAULT_ZOOM, FLYER_LAYER, FLYER_STATUS_COLORS, FLYER_STATUSES, GOOGLE_MAPS_API_KEY, LAYER_COLORS, NEAR_STORE_METERS } from './constants.js';
-import { loadDisplayMode, loadFlyerApartments, loadFlyerAssignees, loadLayers, loadLayerVisibility, loadMapView, loadPhotoImports, loadStores, saveDisplayMode, saveFlyerApartments, saveFlyerAssignees, saveLayers, saveLayerVisibility, saveMapView, savePhotoImports, saveStores } from './storage.js';
+import { loadDisplayMode, loadFlyerApartments, loadFlyerAssignees, loadFlyerSyncQueue, loadLayers, loadLayerVisibility, loadMapView, loadPhotoImports, loadStores, saveDisplayMode, saveFlyerApartments, saveFlyerAssignees, saveFlyerSyncQueue, saveLayers, saveLayerVisibility, saveMapView, savePhotoImports, saveStores } from './storage.js';
 import { distanceMeters, escapeHtml, isValidCoordinate, readFileAsDataUrl } from './utils.js';
 import { isSupabaseConfigured, loadFlyerPlacesFromSupabase, saveFlyerPlacesToSupabase } from './supabaseFlyers.js';
 
@@ -205,6 +205,8 @@ app.innerHTML = `
             <h2>チラシ配布一覧</h2>
             <span id="flyerCount" class="badge">0件</span>
           </div>
+          <div id="flyerSyncStatus" class="flyer-sync-status" aria-live="polite"></div>
+          <button type="button" id="migrateFlyersButton" class="flyer-sync-button" hidden>共有データへ移行</button>
           <div id="flyerStatusSummary" class="flyer-status-summary" aria-live="polite"></div>
           <div class="flyer-legend"><span class="blue">未配布</span><span class="green">配布済み</span><span class="red">配布不可</span><span class="yellow">不在</span></div>
           <button type="button" id="createTwoPersonRouteButton" class="primary flyer-route-button">2人でルート作成</button>
@@ -275,6 +277,8 @@ const elements = {
   flyerList: document.querySelector('#flyerList'),
   flyerCount: document.querySelector('#flyerCount'),
   flyerStatusSummary: document.querySelector('#flyerStatusSummary'),
+  flyerSyncStatus: document.querySelector('#flyerSyncStatus'),
+  migrateFlyersButton: document.querySelector('#migrateFlyersButton'),
   createTwoPersonRouteButton: document.querySelector('#createTwoPersonRouteButton'),
   flyerRouteList: document.querySelector('#flyerRouteList'),
   flyerDetailPanel: document.querySelector('#flyerDetailPanel'),
@@ -291,35 +295,100 @@ async function initializeFlyerStorage() {
   const localFlyers = loadFlyerApartments().map((apt) => ({ ...apt, status: normalizeFlyerStatus(apt.status, apt.distributionDate) }));
   flyerApartments = localFlyers;
 
-  if (!isSupabaseConfigured()) return;
+  if (!isSupabaseConfigured()) {
+    updateFlyerSyncStatus('オフラインデータを使用しています');
+    showToast('オフラインデータを使用しています');
+    return;
+  }
 
   const result = await loadFlyerPlacesFromSupabase();
   if (!result.ok) {
     console.warn(`Supabase接続に失敗したためlocalStorageを使用します: ${result.reason}`);
+    updateFlyerSyncStatus('オフラインデータを使用しています');
+    showToast('オフラインデータを使用しています');
     return;
   }
 
   flyerApartments = mergeFlyerSources(localFlyers, result.places);
   saveFlyerApartments(flyerApartments);
+  updateFlyerSyncStatus('共有データを読み込みました');
+  showToast('共有データを読み込みました');
 
-  if (localFlyers.length) {
-    const migration = await saveFlyerPlacesToSupabase(flyerApartments);
-    if (!migration.ok) console.warn(`localStorageからSupabaseへの初回移行に失敗しました: ${migration.reason}`);
-  }
+  await flushFlyerSyncQueue();
+  updateMigrationButton(result.places.length === 0 && localFlyers.length > 0);
 }
 
 function mergeFlyerSources(localFlyers, remoteFlyers) {
   const merged = new Map();
-  localFlyers.forEach((apt) => merged.set(apt.id, apt));
-  remoteFlyers.forEach((apt) => merged.set(apt.id, { ...(merged.get(apt.id) || {}), ...apt }));
+  [...localFlyers, ...remoteFlyers].forEach((apt) => {
+    const current = merged.get(apt.id);
+    if (!current || isNewerFlyer(apt, current)) merged.set(apt.id, apt);
+  });
   return Array.from(merged.values());
 }
 
-function persistFlyerApartments() {
-  saveFlyerApartments(flyerApartments);
+function isNewerFlyer(a, b) {
+  return Date.parse(a.updatedAt || a.createdAt || 0) >= Date.parse(b.updatedAt || b.createdAt || 0);
+}
+
+function updateFlyerSyncStatus(message) {
+  if (elements.flyerSyncStatus) elements.flyerSyncStatus.textContent = message;
+}
+
+function updateMigrationButton(visible) {
+  if (elements.migrateFlyersButton) elements.migrateFlyersButton.hidden = !visible;
+}
+
+function queueFlyerSync(items) {
+  const merged = new Map(loadFlyerSyncQueue().map((apt) => [apt.id, apt]));
+  items.forEach((apt) => merged.set(apt.id, apt));
+  saveFlyerSyncQueue(Array.from(merged.values()));
+  updateFlyerSyncStatus(`同期待ち ${merged.size}件`);
+}
+
+async function flushFlyerSyncQueue() {
+  const queue = loadFlyerSyncQueue();
+  if (!queue.length || !isSupabaseConfigured()) return;
+  const result = await saveFlyerPlacesToSupabase(queue);
+  if (result.ok) {
+    saveFlyerSyncQueue([]);
+    updateFlyerSyncStatus('同期待ちデータを送信しました');
+    showToast('同期待ちデータを送信しました');
+  } else {
+    updateFlyerSyncStatus(`同期待ち ${queue.length}件`);
+  }
+}
+
+async function migrateLocalFlyersToSupabase() {
   if (!isSupabaseConfigured()) return;
-  saveFlyerPlacesToSupabase(flyerApartments).then((result) => {
-    if (!result.ok) showToast(`Supabase保存に失敗しました。localStorageには保存済みです: ${result.reason}`);
+  if (!confirm('localStorageのチラシ配布データを共有データへ移行しますか？既存IDは更新されます。')) return;
+  updateFlyerSyncStatus('共有データへ移行中...');
+  const result = await saveFlyerPlacesToSupabase(flyerApartments);
+  if (result.ok) {
+    updateMigrationButton(false);
+    updateFlyerSyncStatus('共有データへ移行しました');
+    showToast('共有データへ移行しました');
+  } else {
+    queueFlyerSync(flyerApartments);
+    showToast(`移行に失敗しました。同期待ちに保存しました: ${result.reason}`);
+  }
+}
+
+function persistFlyerApartments(itemsToSync = flyerApartments) {
+  saveFlyerApartments(flyerApartments);
+  if (!isSupabaseConfigured()) {
+    updateFlyerSyncStatus('オフラインデータを使用しています');
+    return;
+  }
+  saveFlyerPlacesToSupabase(itemsToSync).then((result) => {
+    if (result.ok) {
+      updateFlyerSyncStatus('同期済み');
+      showToast('共有データへ保存しました');
+      flushFlyerSyncQueue();
+    } else {
+      queueFlyerSync(itemsToSync);
+      showToast(`Supabase保存に失敗しました。localStorageには保存済みです: ${result.reason}`);
+    }
   });
 }
 
@@ -473,6 +542,8 @@ function bindEvents() {
   elements.flyerDateFilter.addEventListener('change', rerenderFlyerFilters);
   elements.showUndeliveredButton.addEventListener('click', () => { elements.flyerStatusFilter.value = '未配布'; rerenderFlyerFilters(); });
   elements.showDeliveredButton.addEventListener('click', () => { elements.flyerStatusFilter.value = '配布済み'; rerenderFlyerFilters(); });
+  if (elements.migrateFlyersButton) elements.migrateFlyersButton.addEventListener('click', migrateLocalFlyersToSupabase);
+  window.addEventListener('online', flushFlyerSyncQueue);
   elements.clearFlyerFiltersButton.addEventListener('click', () => { elements.assigneeFilter.value = ''; elements.flyerStatusFilter.value = ''; elements.flyerDateFilter.value = ''; rerenderFlyerFilters(); });
   elements.assigneeInputs.forEach((input, index) => input.addEventListener('change', () => updateAssignee(index, input.value)));
   elements.kmlInput.addEventListener('change', importKmlFiles);
@@ -1782,7 +1853,7 @@ function rowsToFlyerApartments(rows) {
       deliveredCount: saved?.deliveredCount || get('配布枚数') || '',
       photos: saved?.photos || [],
       createdAt: saved?.createdAt || importedAt,
-      updatedAt: saved?.updatedAt,
+      updatedAt: saved?.updatedAt || importedAt,
     };
   }).filter(Boolean);
   return imported;
@@ -1934,7 +2005,7 @@ function updateFlyer(id, patch, options = {}) {
   }
   flyerRoutes = flyerRoutes.map((route) => ({ ...route, items: route.items.map((apt) => apt.id === id ? { ...apt, ...normalizedPatch } : apt).filter((apt) => apt.status === '未配布') })).filter((route) => route.items.length);
   flyerApartments = flyerApartments.map((apt) => apt.id === id ? { ...apt, ...normalizedPatch, updatedAt: new Date().toISOString() } : apt);
-  persistFlyerApartments();
+  persistFlyerApartments(flyerApartments.filter((apt) => apt.id === id));
   renderFlyerList();
   renderFlyerRoutes();
   renderMarkers();
