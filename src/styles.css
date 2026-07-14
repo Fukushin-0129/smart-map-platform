@@ -280,3 +280,22 @@ body { background: #edf3ef; }
   .place-detail-actions { grid-template-columns: 1fr 1fr; }
   .place-detail-actions button, .place-detail-header button { min-height: 44px; }
 }
+
+/* 表示モード切替メニュー */
+.display-mode-menu { padding: 1rem; border-bottom: 1px solid #edf6ef; background: #ffffff; }
+.display-mode-label { margin: 0; color: #607568; font-size: 0.86rem; font-weight: 800; }
+.current-display-mode { margin: 0.2rem 0 0.9rem; color: #17301f; font-size: 1.18rem; font-weight: 900; }
+.display-mode-menu h2 { margin: 0 0 0.5rem; color: #31553b; font-size: 0.95rem; }
+.display-mode-options { display: grid; gap: 0.35rem; }
+.display-mode-option { display: flex; grid-template-columns: auto 1fr; align-items: center; gap: 0.7rem; padding: 0.7rem 0.75rem; border: 1px solid transparent; border-radius: 14px; color: #17301f; cursor: pointer; }
+.display-mode-option:hover { background: #f4faf5; }
+.display-mode-option.active { border-color: #bbf7d0; background: #f0fdf4; font-weight: 900; }
+.display-mode-option input { width: auto; min-height: auto; accent-color: #16a34a; }
+
+@media (min-width: 561px) {
+  .management-drawer { width: min(340px, calc(100vw - 28px)); }
+}
+
+@media (max-width: 560px) {
+  .management-drawer { width: min(88vw, 360px); }
+}

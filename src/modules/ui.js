@@ -1,5 +1,5 @@
 import { CANDIDATE_STORE_METERS, DEFAULT_ASSIGNEES, DEFAULT_CENTER, FLYER_LAYER, FLYER_STATUS_COLORS, FLYER_STATUSES, GOOGLE_MAPS_API_KEY, LAYER_COLORS, NEAR_STORE_METERS } from './constants.js';
-import { loadFlyerApartments, loadFlyerAssignees, loadLayers, loadLayerVisibility, loadPhotoImports, loadStores, saveFlyerApartments, saveFlyerAssignees, saveLayers, saveLayerVisibility, savePhotoImports, saveStores } from './storage.js';
+import { loadDisplayMode, loadFlyerApartments, loadFlyerAssignees, loadLayers, loadLayerVisibility, loadPhotoImports, loadStores, saveDisplayMode, saveFlyerApartments, saveFlyerAssignees, saveLayers, saveLayerVisibility, savePhotoImports, saveStores } from './storage.js';
 import { distanceMeters, escapeHtml, isValidCoordinate, readFileAsDataUrl } from './utils.js';
 
 let map;
@@ -19,6 +19,14 @@ let placesService = null;
 let keywordPlaceCandidates = [];
 let photoPlaceCandidates = [];
 let flyerRoutes = [];
+
+const DISPLAY_MODES = [
+  { id: 'all', label: 'すべて表示' },
+  { id: 'salad', label: 'サラダマップ' },
+  { id: 'flyer', label: 'チラシ配布' },
+];
+let displayMode = normalizeDisplayMode(loadDisplayMode());
+let openPlaceDetailRef = null;
 
 const app = document.querySelector('#app');
 
@@ -68,6 +76,19 @@ app.innerHTML = `
         </div>
         <button type="button" id="closeDrawerButton" class="icon-button" aria-label="メニューを閉じる">×</button>
       </div>
+
+      <section class="display-mode-menu" aria-label="表示モード">
+        <p class="display-mode-label">表示中:</p>
+        <p id="currentDisplayMode" class="current-display-mode"></p>
+        <h2>表示モード</h2>
+        <div class="display-mode-options">
+          ${DISPLAY_MODES.map((mode) => `
+            <label class="display-mode-option">
+              <input type="radio" name="displayMode" value="${mode.id}" />
+              <span>${mode.label}</span>
+            </label>`).join('')}
+        </div>
+      </section>
 
       <nav class="drawer-menu" aria-label="管理機能">
         <button type="button" data-open-panel="layers">レイヤー</button>
@@ -215,6 +236,8 @@ const elements = {
   drawerBackdrop: document.querySelector('#drawerBackdrop'),
   managementDrawer: document.querySelector('#managementDrawer'),
   managementPanelTitle: document.querySelector('#managementPanelTitle'),
+  currentDisplayMode: document.querySelector('#currentDisplayMode'),
+  displayModeInputs: Array.from(document.querySelectorAll('[name="displayMode"]')),
   addFabButton: document.querySelector('#addFabButton'),
   addFabMenu: document.querySelector('#addFabMenu'),
   searchResultsPanel: document.querySelector('#searchResultsPanel'),
@@ -268,6 +291,7 @@ export async function initializeApp() {
   renderStoreList();
   renderFlyerList();
   renderPhotoReview();
+  renderDisplayModeMenu();
   bindEvents();
 
   try {
@@ -372,6 +396,7 @@ function bindEvents() {
       closeAddMenu();
     });
   });
+  elements.displayModeInputs.forEach((input) => input.addEventListener('change', () => setDisplayMode(input.value)));
   elements.addFabButton.addEventListener('click', () => toggleAddMenu());
   elements.locateButton.addEventListener('click', locateUser);
   elements.useCenterButton.addEventListener('click', () => {
@@ -382,6 +407,7 @@ function bindEvents() {
   elements.searchInput.addEventListener('input', () => {
     renderStoreList();
     renderMarkers();
+    closeHiddenPlaceDetail();
   });
   elements.searchInput.addEventListener('focus', () => renderSearchResults());
   elements.photoInput.addEventListener('change', importPhotoFiles);
@@ -1158,6 +1184,35 @@ function bindPlaceMarkerClick(marker, openDetail) {
   marker.addListener('mouseup', handleOpen);
 }
 
+function normalizeDisplayMode(value) {
+  return DISPLAY_MODES.some((mode) => mode.id === value) ? value : 'all';
+}
+
+function displayModeLabel(modeId = displayMode) {
+  return DISPLAY_MODES.find((mode) => mode.id === modeId)?.label || DISPLAY_MODES[0].label;
+}
+
+function renderDisplayModeMenu() {
+  elements.currentDisplayMode.textContent = displayModeLabel();
+  elements.displayModeInputs.forEach((input) => {
+    input.checked = input.value === displayMode;
+    input.closest('.display-mode-option')?.classList.toggle('active', input.checked);
+  });
+}
+
+function setDisplayMode(nextMode) {
+  displayMode = normalizeDisplayMode(nextMode);
+  saveDisplayMode(displayMode);
+  renderDisplayModeMenu();
+  renderStoreList();
+  renderFlyerList();
+  renderFlyerRoutes();
+  renderLayerList();
+  renderMarkers();
+  closeHiddenPlaceDetail();
+  fitMapToVisibleData();
+}
+
 function fitMapToVisibleData() {
   if (!map || !window.google?.maps) return;
   const bounds = new google.maps.LatLngBounds();
@@ -1185,6 +1240,7 @@ function markerIconForStore(store) {
 }
 
 function openStoreInfo(store, marker) {
+  openPlaceDetailRef = { type: 'store', id: store.id };
   openPlaceDetail(renderStoreDetailCard(store), store.name);
   if (marker?.getPosition && map) map.panTo(marker.getPosition());
 }
@@ -1209,6 +1265,7 @@ function openPlaceDetail(content, title = 'Place詳細') {
 }
 
 function closePlaceDetail() {
+  openPlaceDetailRef = null;
   elements.placeDetailPanel.hidden = true;
   elements.placeDetailPanel.classList.remove('expanded');
   elements.placeDetailPanel.innerHTML = '';
@@ -1460,11 +1517,27 @@ function visibleFlyerPlaces() {
   return filteredFlyerApartments().filter((apt) => isValidCoordinate(apt.lat, apt.lng));
 }
 
+function isSaladRelatedStore(store) {
+  if (!store.layerId) return true;
+  const layer = getLayerById(store.layerId);
+  const haystack = [store.layerName, store.category, store.description, layer?.name, layer?.fileName].join(' ').toLowerCase();
+  return haystack.includes('サラダ') || haystack.includes('salad');
+}
+
+function closeHiddenPlaceDetail() {
+  if (!openPlaceDetailRef) return;
+  const visible = openPlaceDetailRef.type === 'store'
+    ? visibleStorePlaces().some((store) => store.id === openPlaceDetailRef.id)
+    : visibleFlyerPlaces().some((apt) => apt.id === openPlaceDetailRef.id);
+  if (!visible) closePlaceDetail();
+}
+
 function filteredStores() {
   const keyword = elements.searchInput.value.trim().toLowerCase();
   const visibleLayerIds = new Set(layers.filter((layer) => isLayerVisible(layer.id)).map((layer) => layer.id));
   const defaultStoresVisible = isLayerVisible('default-stores');
-  const layerFilteredStores = stores.filter((store) => store.layerId ? visibleLayerIds.has(store.layerId) : defaultStoresVisible);
+  const modeFilteredStores = displayMode === 'flyer' ? [] : stores.filter((store) => displayMode === 'all' || isSaladRelatedStore(store));
+  const layerFilteredStores = modeFilteredStores.filter((store) => store.layerId ? visibleLayerIds.has(store.layerId) : defaultStoresVisible);
   if (!keyword) return layerFilteredStores;
   return layerFilteredStores.filter((store) => [store.name, store.category, store.description, store.layerName, store.address].some((value) => String(value || '').toLowerCase().includes(keyword)));
 }
@@ -1603,6 +1676,7 @@ function normalizeFlyerAssignee(name) {
 }
 
 function filteredFlyerApartments() {
+  if (displayMode === 'salad') return [];
   const keyword = elements.searchInput.value.trim().toLowerCase();
   const assignee = elements.assigneeFilter.value;
   const status = elements.flyerStatusFilter.value;
@@ -1739,6 +1813,7 @@ function numberedMarkerSvg(color, label) {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 function openFlyerInfo(apt, marker) {
+  openPlaceDetailRef = { type: 'flyer', id: apt.id };
   openPlaceDetail(renderFlyerDetailCard(apt), apt.name);
   if (marker?.getPosition && map) map.panTo(marker.getPosition());
 }
