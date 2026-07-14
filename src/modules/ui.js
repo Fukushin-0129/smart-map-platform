@@ -1,5 +1,5 @@
-import { CANDIDATE_STORE_METERS, DEFAULT_ASSIGNEES, DEFAULT_CENTER, FLYER_LAYER, FLYER_STATUS_COLORS, FLYER_STATUSES, GOOGLE_MAPS_API_KEY, LAYER_COLORS, NEAR_STORE_METERS } from './constants.js';
-import { loadDisplayMode, loadFlyerApartments, loadFlyerAssignees, loadLayers, loadLayerVisibility, loadPhotoImports, loadStores, saveDisplayMode, saveFlyerApartments, saveFlyerAssignees, saveLayers, saveLayerVisibility, savePhotoImports, saveStores } from './storage.js';
+import { CANDIDATE_STORE_METERS, DEFAULT_ASSIGNEES, DEFAULT_CENTER, DEFAULT_ZOOM, FLYER_LAYER, FLYER_STATUS_COLORS, FLYER_STATUSES, GOOGLE_MAPS_API_KEY, LAYER_COLORS, NEAR_STORE_METERS } from './constants.js';
+import { loadDisplayMode, loadFlyerApartments, loadFlyerAssignees, loadLayers, loadLayerVisibility, loadMapView, loadPhotoImports, loadStores, saveDisplayMode, saveFlyerApartments, saveFlyerAssignees, saveLayers, saveLayerVisibility, saveMapView, savePhotoImports, saveStores } from './storage.js';
 import { distanceMeters, escapeHtml, isValidCoordinate, readFileAsDataUrl } from './utils.js';
 
 let map;
@@ -64,6 +64,7 @@ app.innerHTML = `
       </div>
 
       <p id="mapStatus" class="status map-status">Google Mapsを読み込み中です。</p>
+      <div id="appToast" class="app-toast" role="status" aria-live="polite" hidden></div>
       <aside id="placeDetailPanel" class="place-detail-panel" aria-live="polite" hidden></aside>
     </section>
 
@@ -230,6 +231,7 @@ app.innerHTML = `
 
 const elements = {
   mapStatus: document.querySelector('#mapStatus'),
+  appToast: document.querySelector('#appToast'),
   mapSetup: document.querySelector('#mapSetup'),
   menuButton: document.querySelector('#menuButton'),
   closeDrawerButton: document.querySelector('#closeDrawerButton'),
@@ -302,7 +304,7 @@ export async function initializeApp() {
     await loadGoogleMaps();
     map = new google.maps.Map(document.querySelector('#map'), {
       center: DEFAULT_CENTER,
-      zoom: 13,
+      zoom: DEFAULT_ZOOM,
       mapTypeControl: false,
       streetViewControl: false,
       fullscreenControl: true,
@@ -311,7 +313,8 @@ export async function initializeApp() {
     placesService = new google.maps.places.PlacesService(map);
     map.addListener('click', (event) => fillCoordinates(event.latLng.lat(), event.latLng.lng()));
     renderMarkers();
-    fitMapToVisibleData();
+    restoreMapViewOrFitVisibleData();
+    map.addListener('idle', saveCurrentMapView);
     elements.mapSetup.hidden = true;
     elements.mapStatus.textContent = 'Google Mapを表示しました。地図上をクリックすると、メニュー内の店舗登録フォームに緯度・経度を入力できます。';
   } catch (error) {
@@ -459,7 +462,7 @@ function bindEvents() {
     elements.storeForm.reset();
     renderStoreList();
     renderMarkers();
-    fitMapToVisibleData();
+    fitMapToVisibleData({ items: [store] });
     focusStore(store.id);
   });
 }
@@ -473,6 +476,7 @@ async function importPhotoFiles(event) {
   elements.photoStatus.textContent = '写真を読み込んでいます...';
   const stats = { attached: 0, candidates: 0, created: 0, unclassified: 0, errors: [] };
   const results = [];
+  const previousCandidateIds = new Set(photoPlaceCandidates.map((group) => group.id));
 
   try {
     for (const file of files) {
@@ -486,7 +490,8 @@ async function importPhotoFiles(event) {
     renderPhotoReview();
     renderPlaceCandidates();
     renderMarkers();
-    fitMapToVisibleData();
+    const importedOrigins = photoPlaceCandidates.filter((group) => !previousCandidateIds.has(group.id)).map((group) => group.origin);
+    fitMapToVisibleData({ items: importedOrigins });
   } finally {
     elements.photoStatus.textContent = formatPhotoImportStatus(stats, results);
     event.target.value = '';
@@ -978,7 +983,7 @@ async function importKmlFiles(event) {
     renderLayerList();
     renderStoreList();
     renderMarkers();
-    fitMapToVisibleData();
+    fitMapToVisibleData({ items: importedStores });
   }
 
   elements.kmlStatus.textContent = [
@@ -1213,25 +1218,106 @@ function setDisplayMode(nextMode) {
   fitMapToVisibleData();
 }
 
-function fitMapToVisibleData() {
-  if (!map || !window.google?.maps) return;
-  const bounds = new google.maps.LatLngBounds();
-  let count = 0;
-  [...visibleStorePlaces(), ...visibleFlyerPlaces()].forEach((item) => {
-    bounds.extend({ lat: item.lat, lng: item.lng });
-    count += 1;
-  });
-  if (!count) {
-    map.setCenter({ lat: 20, lng: 0 });
-    map.setZoom(2);
+function restoreMapViewOrFitVisibleData() {
+  const savedView = normalizeSavedMapView(loadMapView());
+  if (savedView) {
+    map.setCenter({ lat: savedView.lat, lng: savedView.lng });
+    map.setZoom(savedView.zoom);
     return;
   }
-  if (count === 1) {
-    map.setCenter(bounds.getCenter());
+  fitMapToVisibleData();
+}
+
+function fitMapToVisibleData(options = {}) {
+  if (!map || !window.google?.maps) return;
+  const sourceItems = Array.isArray(options.items) ? options.items : [...visibleStorePlaces(), ...visibleFlyerPlaces()];
+  const { validItems, invalidCount, reversedCount } = validFitBoundsItems(sourceItems);
+  if (reversedCount) {
+    console.warn('緯度経度が逆転している可能性があります', { count: reversedCount });
+    showMapToast('緯度経度が逆転している可能性があります');
+  }
+  if (invalidCount) showMapToast(`${invalidCount}件の地点は座標異常のため地図表示対象外です`);
+
+  if (!validItems.length) {
+    map.setCenter(DEFAULT_CENTER);
+    map.setZoom(DEFAULT_ZOOM);
+    return;
+  }
+
+  if (validItems.length === 1) {
+    map.setCenter({ lat: Number(validItems[0].lat), lng: Number(validItems[0].lng) });
     map.setZoom(15);
     return;
   }
+
+  const bounds = new google.maps.LatLngBounds();
+  validItems.forEach((item) => bounds.extend({ lat: Number(item.lat), lng: Number(item.lng) }));
   map.fitBounds(bounds, 64);
+}
+
+function validFitBoundsItems(items) {
+  return items.reduce((result, item) => {
+    const lat = Number(item?.lat);
+    const lng = Number(item?.lng);
+    if (isReversedJapanCoordinateCandidate(lat, lng)) result.reversedCount += 1;
+    if (!isSafeFitCoordinate(lat, lng)) {
+      result.invalidCount += 1;
+      return result;
+    }
+    result.validItems.push({ ...item, lat, lng });
+    return result;
+  }, { validItems: [], invalidCount: 0, reversedCount: 0 });
+}
+
+function isSafeFitCoordinate(lat, lng) {
+  return Number.isFinite(lat)
+    && Number.isFinite(lng)
+    && lat >= -90 && lat <= 90
+    && lng >= -180 && lng <= 180
+    && !(lat === 0 && lng === 0)
+    && lat >= 20 && lat <= 46
+    && lng >= 122 && lng <= 154;
+}
+
+function isReversedJapanCoordinateCandidate(lat, lng) {
+  return Number.isFinite(lat)
+    && Number.isFinite(lng)
+    && lat >= 122 && lat <= 154
+    && lng >= 20 && lng <= 46;
+}
+
+function normalizeSavedMapView(view) {
+  const lat = Number(view?.lat);
+  const lng = Number(view?.lng);
+  const zoom = Number(view?.zoom);
+  if (!isGlobalMapCoordinate(lat, lng) || !Number.isFinite(zoom)) return null;
+  return { lat, lng, zoom: Math.min(21, Math.max(3, Math.round(zoom))) };
+}
+
+function isGlobalMapCoordinate(lat, lng) {
+  return Number.isFinite(lat)
+    && Number.isFinite(lng)
+    && lat >= -90 && lat <= 90
+    && lng >= -180 && lng <= 180
+    && !(lat === 0 && lng === 0);
+}
+
+function saveCurrentMapView() {
+  if (!map) return;
+  const center = map.getCenter();
+  if (!center) return;
+  const lat = center.lat();
+  const lng = center.lng();
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  saveMapView({ lat, lng, zoom: map.getZoom() ?? DEFAULT_ZOOM, updatedAt: new Date().toISOString() });
+}
+
+function showMapToast(message) {
+  if (!elements.appToast) return;
+  elements.appToast.textContent = message;
+  elements.appToast.hidden = false;
+  clearTimeout(showMapToast.timer);
+  showMapToast.timer = setTimeout(() => { elements.appToast.hidden = true; }, 3200);
 }
 
 function markerIconForStore(store) {
@@ -1569,14 +1655,14 @@ async function importCsvFile(event) {
   elements.csvStatus.textContent = 'CSVを読み込んでいます...';
   try {
     const rows = parseCsv(await file.text());
-    const imported = rowsToFlyerApartments(rows);
-    flyerApartments = imported;
+    const importedOnly = rowsToFlyerApartments(rows);
+    flyerApartments = mergeFlyerApartments(importedOnly);
     saveFlyerApartments(flyerApartments);
     renderLayerList();
     renderFlyerList();
     renderMarkers();
-    fitMapToVisibleData();
-    elements.csvStatus.textContent = `${imported.length}件を「チラシ配布」レイヤーとして読み込みました。保存済み実績は同じ物件に引き継ぎました。`;
+    fitMapToVisibleData({ items: importedOnly });
+    elements.csvStatus.textContent = `${importedOnly.length}件を「チラシ配布」レイヤーとして読み込みました。保存済み実績は同じ物件に引き継ぎました。`;
   } catch (error) {
     elements.csvStatus.textContent = error.message || 'CSVの読み込みに失敗しました。';
   } finally {
@@ -1646,6 +1732,10 @@ function rowsToFlyerApartments(rows) {
       updatedAt: saved?.updatedAt,
     };
   }).filter(Boolean);
+  return imported;
+}
+
+function mergeFlyerApartments(imported) {
   const importedKeys = new Set(imported.map(flyerMatchKey));
   return [...imported, ...flyerApartments.filter((apt) => !importedKeys.has(flyerMatchKey(apt)))];
 }
