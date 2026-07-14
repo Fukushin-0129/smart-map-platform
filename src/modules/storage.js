@@ -1,4 +1,4 @@
-import { ASSIGNEES_STORAGE_KEY, DEFAULT_ASSIGNEES, FLYER_STORAGE_KEY, LAYERS_STORAGE_KEY, LAYER_VISIBILITY_STORAGE_KEY, PHOTO_IMPORT_STORAGE_KEY, STORAGE_KEY } from './constants.js';
+import { ASSIGNEES_STORAGE_KEY, DEFAULT_ASSIGNEES, DISPLAY_MODE_STORAGE_KEY, FLYER_STORAGE_KEY, LAYERS_STORAGE_KEY, LAYER_VISIBILITY_STORAGE_KEY, PHOTO_IMPORT_STORAGE_KEY, STORAGE_KEY } from './constants.js';
 
 export function loadStores() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { return []; }
@@ -33,3 +33,5 @@ export function saveLayerVisibility(layerVisibility) { localStorage.setItem(LAYE
 export function savePhotoImports(photoImports) { localStorage.setItem(PHOTO_IMPORT_STORAGE_KEY, JSON.stringify(photoImports)); }
 export function saveFlyerApartments(flyerApartments) { localStorage.setItem(FLYER_STORAGE_KEY, JSON.stringify(flyerApartments)); }
 export function saveFlyerAssignees(flyerAssignees) { localStorage.setItem(ASSIGNEES_STORAGE_KEY, JSON.stringify(flyerAssignees)); }
+export function loadDisplayMode() { try { return localStorage.getItem(DISPLAY_MODE_STORAGE_KEY) || 'all'; } catch { return 'all'; } }
+export function saveDisplayMode(displayMode) { localStorage.setItem(DISPLAY_MODE_STORAGE_KEY, displayMode); }

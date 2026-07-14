@@ -11,5 +11,6 @@ export const FLYER_LAYER = { id: 'flyer-apartments', name: 'チラシ配布', co
 export const FLYER_STATUSES = ['未配布', '配布済み', '配布不可', '不在'];
 export const FLYER_STATUS_COLORS = { '未配布': '#2563eb', '配布済み': '#16a34a', '配布不可': '#dc2626', '不在': '#f59e0b' };
 export const ASSIGNEES_STORAGE_KEY = 'smart-map-platform:flyer-assignees';
+export const DISPLAY_MODE_STORAGE_KEY = 'smart-map-platform:display-mode';
 export const DEFAULT_ASSIGNEES = ['福山', '担当２', '担当３', '担当４', '担当５', '担当６', '担当７', '担当８', '担当９', '担当１０'];
 export const LAYER_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899'];
