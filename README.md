@@ -126,3 +126,48 @@ npm run check
 ```
 
 ビルド成果物は `dist/` に作成されます。`dist/config.js` には環境変数 `GOOGLE_MAPS_API_KEY` の値が書き込まれます。
+
+## Supabaseでチラシ配布データを共有する
+
+チラシ配布データ（`flyerApartments`）だけをSupabaseの `flyer_places` テーブルにも保存できます。店舗データ、サラダデータ、KML/CSV形式、既存のlocalStorageバックアップは変更しません。Supabaseが未設定、または接続に失敗した場合は従来どおりlocalStorageのデータで起動します。
+
+### 接続設定
+
+`config.js` に次の値を設定します。URLクエリの `?supabaseUrl=...&supabaseAnonKey=...` でも一時的に指定できます。
+
+```js
+window.SMART_MAP_SUPABASE_URL = 'https://YOUR_PROJECT.supabase.co';
+window.SMART_MAP_SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+```
+
+Vercelなどで公開する場合は、ビルド後の `dist/config.js` に同等の値を配信するか、公開URLのクエリパラメータで動作確認してください。
+
+### 最小テーブル
+
+最初の動作確認用SQL例です。認証なしで確認できるようにする場合でも、本番運用では必ず認証とRLS（Row Level Security）を設計してください。
+
+```sql
+create table if not exists public.flyer_places (
+  id text primary key,
+  name text not null,
+  address text,
+  latitude double precision not null,
+  longitude double precision not null,
+  status text default '未配布',
+  assignee text,
+  distributed_at date,
+  quantity integer,
+  memo text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+```
+
+### 動作
+
+- 起動時にSupabaseから `flyer_places` を読み込み、localStorageの `smart-map-platform:flyer-apartments` とマージします。
+- localStorageに既存のチラシ配布データがある場合、初回起動時にSupabaseへupsertして移行します。
+- 配布状況、配布日、担当者、配布枚数、メモ、CSV取り込み後のチラシ配布データはlocalStorageへ保存しつつSupabaseにもupsertします。
+- Supabase接続・保存に失敗してもlocalStorageバックアップを使うため、アプリが真っ白にならない設計です。
+
+> **重要:** 今回は動作確認を優先して、認証なしでも使える最小構成にしています。本番運用ではSupabase Authなどの認証、RLSポリシー、書き込み権限の制限、プロジェクトごとのデータ分離を必ず設定してください。
