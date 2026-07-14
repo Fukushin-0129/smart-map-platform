@@ -317,5 +317,7 @@ body { background: #edf3ef; }
 @media (max-width: 560px) {
   .management-drawer { width: min(88vw, 360px); }
 }
+.flyer-sync-card { margin-bottom: 1rem; padding: 0.9rem; border: 1px solid #d9f4df; border-radius: 18px; background: #fbfffc; }
+.flyer-sync-card h2 { margin: 0 0 0.45rem; color: #17301f; font-size: 1rem; }
 .flyer-sync-status { margin: 0 0 0.65rem; color: #31553b; font-size: 0.86rem; font-weight: 800; }
-.flyer-sync-button { margin-bottom: 0.75rem; width: 100%; }
+.flyer-sync-button { margin-bottom: 0.25rem; width: 100%; }

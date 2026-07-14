@@ -1,5 +1,5 @@
 import { CANDIDATE_STORE_METERS, DEFAULT_ASSIGNEES, DEFAULT_CENTER, DEFAULT_ZOOM, FLYER_LAYER, FLYER_STATUS_COLORS, FLYER_STATUSES, GOOGLE_MAPS_API_KEY, LAYER_COLORS, NEAR_STORE_METERS } from './constants.js';
-import { loadDisplayMode, loadFlyerApartments, loadFlyerAssignees, loadFlyerSyncQueue, loadLayers, loadLayerVisibility, loadMapView, loadPhotoImports, loadStores, saveDisplayMode, saveFlyerApartments, saveFlyerAssignees, saveFlyerSyncQueue, saveLayers, saveLayerVisibility, saveMapView, savePhotoImports, saveStores } from './storage.js';
+import { hasMigratedFlyerPlaces, loadDisplayMode, loadFlyerApartments, loadFlyerAssignees, loadFlyerPlacesMigrationSource, loadFlyerSyncQueue, loadLayers, loadLayerVisibility, loadMapView, loadPhotoImports, loadStores, markFlyerPlacesMigrated, saveDisplayMode, saveFlyerApartments, saveFlyerAssignees, saveFlyerSyncQueue, saveLayers, saveLayerVisibility, saveMapView, savePhotoImports, saveStores } from './storage.js';
 import { distanceMeters, escapeHtml, isValidCoordinate, readFileAsDataUrl } from './utils.js';
 import { isSupabaseConfigured, loadFlyerPlacesFromSupabase, saveFlyerPlacesToSupabase } from './supabaseFlyers.js';
 
@@ -106,6 +106,11 @@ app.innerHTML = `
 
       <div class="drawer-content panel controls">
         <section data-panel="layers">
+          <div class="flyer-sync-card">
+            <h2>チラシ配布データ同期</h2>
+            <p id="flyerSyncStatus" class="flyer-sync-status" aria-live="polite"></p>
+            <button type="button" id="migrateFlyersButton" class="flyer-sync-button" hidden>初回同期して共有データへ移行</button>
+          </div>
           <div class="list-header">
             <h2>KMLレイヤー</h2>
             <span id="layerCount" class="badge">0件</span>
@@ -205,8 +210,6 @@ app.innerHTML = `
             <h2>チラシ配布一覧</h2>
             <span id="flyerCount" class="badge">0件</span>
           </div>
-          <div id="flyerSyncStatus" class="flyer-sync-status" aria-live="polite"></div>
-          <button type="button" id="migrateFlyersButton" class="flyer-sync-button" hidden>共有データへ移行</button>
           <div id="flyerStatusSummary" class="flyer-status-summary" aria-live="polite"></div>
           <div class="flyer-legend"><span class="blue">未配布</span><span class="green">配布済み</span><span class="red">配布不可</span><span class="yellow">不在</span></div>
           <button type="button" id="createTwoPersonRouteButton" class="primary flyer-route-button">2人でルート作成</button>
@@ -292,7 +295,7 @@ const elements = {
 };
 
 async function initializeFlyerStorage() {
-  const localFlyers = loadFlyerApartments().map((apt) => ({ ...apt, status: normalizeFlyerStatus(apt.status, apt.distributionDate) }));
+  const localFlyers = loadFlyerPlacesMigrationSource().map((apt) => ({ ...apt, status: normalizeFlyerStatus(apt.status, apt.distributionDate) }));
   flyerApartments = localFlyers;
 
   if (!isSupabaseConfigured()) {
@@ -309,13 +312,20 @@ async function initializeFlyerStorage() {
     return;
   }
 
-  flyerApartments = mergeFlyerSources(localFlyers, result.places);
-  saveFlyerApartments(flyerApartments);
-  updateFlyerSyncStatus('共有データを読み込みました');
-  showToast('共有データを読み込みました');
+  if (hasMigratedFlyerPlaces()) {
+    flyerApartments = result.places;
+    saveFlyerApartments(flyerApartments);
+    updateMigrationButton(false);
+    updateFlyerSyncStatus('共有データを正として読み込みました');
+    showToast('共有データを読み込みました');
+  } else {
+    flyerApartments = mergeFlyerSources(localFlyers, result.places);
+    saveFlyerApartments(flyerApartments);
+    updateMigrationButton(localFlyers.length > 0);
+    updateFlyerSyncStatus('初回同期前: localStorageデータを確認してください');
+  }
 
   await flushFlyerSyncQueue();
-  updateMigrationButton(result.places.length === 0 && localFlyers.length > 0);
 }
 
 function mergeFlyerSources(localFlyers, remoteFlyers) {
@@ -360,18 +370,42 @@ async function flushFlyerSyncQueue() {
 }
 
 async function migrateLocalFlyersToSupabase() {
-  if (!isSupabaseConfigured()) return;
-  if (!confirm('localStorageのチラシ配布データを共有データへ移行しますか？既存IDは更新されます。')) return;
-  updateFlyerSyncStatus('共有データへ移行中...');
-  const result = await saveFlyerPlacesToSupabase(flyerApartments);
-  if (result.ok) {
+  if (!isSupabaseConfigured() || hasMigratedFlyerPlaces()) {
     updateMigrationButton(false);
-    updateFlyerSyncStatus('共有データへ移行しました');
-    showToast('共有データへ移行しました');
-  } else {
-    queueFlyerSync(flyerApartments);
-    showToast(`移行に失敗しました。同期待ちに保存しました: ${result.reason}`);
+    return;
   }
+  const localFlyers = dedupeFlyerApartments(loadFlyerPlacesMigrationSource().map((apt) => ({ ...apt, status: normalizeFlyerStatus(apt.status, apt.distributionDate) })));
+  if (!localFlyers.length) {
+    markFlyerPlacesMigrated();
+    updateMigrationButton(false);
+    updateFlyerSyncStatus('移行対象のlocalStorageデータはありません');
+    return;
+  }
+  if (!confirm(`${localFlyers.length}件のlocalStorageチラシ配布データを初回のみSupabaseへ同期します。同期完了後はSupabaseの共有データを正として利用します。よろしいですか？`)) return;
+  updateFlyerSyncStatus('初回同期中...');
+  const result = await saveFlyerPlacesToSupabase(localFlyers);
+  if (result.ok) {
+    markFlyerPlacesMigrated();
+    const remote = await loadFlyerPlacesFromSupabase();
+    flyerApartments = remote.ok ? remote.places : localFlyers;
+    saveFlyerApartments(flyerApartments);
+    updateMigrationButton(false);
+    updateFlyerSyncStatus('初回同期が完了しました。共有データを正として利用します');
+    showToast('初回同期が完了しました');
+    renderFlyerList();
+    renderMarkers();
+  } else {
+    queueFlyerSync(localFlyers);
+    showToast(`初回同期に失敗しました。同期待ちに保存しました: ${result.reason}`);
+  }
+}
+
+function dedupeFlyerApartments(items) {
+  return Array.from(items.reduce((merged, apt) => {
+    const current = merged.get(apt.id);
+    if (!current || isNewerFlyer(apt, current)) merged.set(apt.id, apt);
+    return merged;
+  }, new Map()).values());
 }
 
 function persistFlyerApartments(itemsToSync = flyerApartments) {

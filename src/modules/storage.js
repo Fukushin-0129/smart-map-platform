@@ -1,4 +1,4 @@
-import { ASSIGNEES_STORAGE_KEY, DEFAULT_ASSIGNEES, DISPLAY_MODE_STORAGE_KEY, FLYER_STORAGE_KEY, FLYER_SYNC_QUEUE_STORAGE_KEY, LAYERS_STORAGE_KEY, LAYER_VISIBILITY_STORAGE_KEY, MAP_VIEW_STORAGE_KEY, PHOTO_IMPORT_STORAGE_KEY, STORAGE_KEY } from './constants.js';
+import { ASSIGNEES_STORAGE_KEY, DEFAULT_ASSIGNEES, DISPLAY_MODE_STORAGE_KEY, FLYER_STORAGE_KEY, FLYER_MIGRATION_STORAGE_KEY, FLYER_SYNC_QUEUE_STORAGE_KEY, LEGACY_FLYER_PLACES_STORAGE_KEYS, LAYERS_STORAGE_KEY, LAYER_VISIBILITY_STORAGE_KEY, MAP_VIEW_STORAGE_KEY, PHOTO_IMPORT_STORAGE_KEY, STORAGE_KEY } from './constants.js';
 
 export function loadStores() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { return []; }
@@ -21,6 +21,19 @@ export function loadPhotoImports() {
 export function loadFlyerApartments() {
   try { return JSON.parse(localStorage.getItem(FLYER_STORAGE_KEY)) || []; } catch { return []; }
 }
+export function loadFlyerPlacesMigrationSource() {
+  const merged = new Map();
+  [loadFlyerApartments(), ...LEGACY_FLYER_PLACES_STORAGE_KEYS.map(loadStorageArray)].flat().forEach((apt) => {
+    if (apt?.id) merged.set(apt.id, apt);
+  });
+  return Array.from(merged.values());
+}
+function loadStorageArray(key) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+}
 export function loadFlyerAssignees() {
   try {
     const parsed = JSON.parse(localStorage.getItem(ASSIGNEES_STORAGE_KEY));
@@ -32,6 +45,8 @@ export function saveLayers(layers) { localStorage.setItem(LAYERS_STORAGE_KEY, JS
 export function saveLayerVisibility(layerVisibility) { localStorage.setItem(LAYER_VISIBILITY_STORAGE_KEY, JSON.stringify(layerVisibility)); }
 export function savePhotoImports(photoImports) { localStorage.setItem(PHOTO_IMPORT_STORAGE_KEY, JSON.stringify(photoImports)); }
 export function saveFlyerApartments(flyerApartments) { localStorage.setItem(FLYER_STORAGE_KEY, JSON.stringify(flyerApartments)); }
+export function hasMigratedFlyerPlaces() { try { return localStorage.getItem(FLYER_MIGRATION_STORAGE_KEY) === 'done'; } catch { return false; } }
+export function markFlyerPlacesMigrated() { localStorage.setItem(FLYER_MIGRATION_STORAGE_KEY, 'done'); }
 export function loadFlyerSyncQueue() {
   try {
     const parsed = JSON.parse(localStorage.getItem(FLYER_SYNC_QUEUE_STORAGE_KEY));
