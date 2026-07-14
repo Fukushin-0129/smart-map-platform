@@ -1935,14 +1935,6 @@ function bindFlyerDetailControls(root) {
   });
 }
 
-function showToast(message) {
-  if (!elements.appToast) return;
-  elements.appToast.textContent = message;
-  elements.appToast.hidden = false;
-  clearTimeout(showToast.timer);
-  showToast.timer = setTimeout(() => { elements.appToast.hidden = true; }, 2600);
-}
-
 function todayString() {
   return new Date().toISOString().slice(0, 10);
 }
