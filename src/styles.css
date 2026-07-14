@@ -154,7 +154,22 @@ input:focus, textarea:focus, select:focus { outline: 3px solid #bbf7d0; border-c
 .flyer-detail-form input, .flyer-detail-form select, .flyer-detail-form textarea { padding: 0.55rem 0.65rem; border-radius: 10px; }
 .flyer-detail-header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
 .flyer-detail-header button { width: 36px; height: 36px; padding: 0; font-size: 1.25rem; }
-.flyer-detail-status-buttons { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.flyer-detail-status-buttons { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.flyer-detail-card { display: grid; gap: 0.85rem; border-left: 7px solid var(--status-color); padding-left: 0.85rem; }
+.flyer-current-status { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin: 0; padding: 0.75rem 0.85rem; border-radius: 14px; background: #f8fff9; color: #31553b; font-weight: 800; }
+.flyer-current-status strong { color: #17301f; }
+.flyer-status-button { min-height: 44px; border: 2px solid color-mix(in srgb, var(--status-color) 60%, white); background: #ffffff; color: #17301f; font-weight: 900; }
+.flyer-status-button.selected { background: var(--status-color); border-color: var(--status-color); color: #ffffff; box-shadow: 0 8px 18px color-mix(in srgb, var(--status-color) 28%, transparent); }
+.flyer-status-button[style*="#f59e0b"].selected { color: #3b2600; }
+.flyer-detail-fields { display: grid; gap: 0.65rem; }
+.flyer-detail-fields label { display: grid; gap: 0.3rem; color: #31553b; font-size: 0.9rem; font-weight: 800; }
+.flyer-detail-fields input, .flyer-detail-fields select, .flyer-detail-fields textarea { width: 100%; min-width: 0; padding: 0.7rem 0.75rem; border: 1px solid #d9f4df; border-radius: 12px; font: inherit; }
+.flyer-detail-fields textarea { resize: vertical; overflow-wrap: anywhere; }
+.flyer-readonly-field { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.7rem 0.85rem; border: 1px solid #d9f4df; border-radius: 12px; background: #fbfffc; color: #31553b; font-weight: 800; }
+.app-toast { position: fixed; z-index: 60; left: 50%; bottom: max(24px, env(safe-area-inset-bottom)); transform: translateX(-50%); max-width: min(420px, calc(100vw - 32px)); padding: 0.7rem 1rem; border-radius: 999px; background: rgba(23, 48, 31, 0.94); color: #ffffff; font-weight: 800; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.24); }
+.app-toast[hidden] { display: none; }
+
 .quick-filter-row button { min-height: 48px; }
 
 .flyer-detail-panel { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; max-height: 82vh; overflow: auto; padding: 1rem; border-radius: 24px 24px 0 0; border: 1px solid #d9f4df; background: #ffffff; box-shadow: 0 -18px 50px rgba(20, 83, 45, 0.18); }
@@ -162,7 +177,7 @@ input:focus, textarea:focus, select:focus { outline: 3px solid #bbf7d0; border-c
 .flyer-detail-panel .flyer-detail-form { max-width: 560px; margin: 0 auto; }
 
 @media (max-width: 560px) {
-  .flyer-detail-panel .flyer-detail-status-buttons { grid-template-columns: 1fr; }
+  .flyer-detail-panel .flyer-detail-status-buttons, .flyer-detail-status-buttons { grid-template-columns: 1fr; }
   .flyer-detail-panel .flyer-detail-status-buttons button, .flyer-detail-panel .flyer-detail-form button[type="submit"] { min-height: 58px; font-size: 1.05rem; }
 }
 
