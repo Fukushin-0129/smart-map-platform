@@ -194,9 +194,6 @@ body { background: #edf3ef; }
 .add-fab-menu[hidden] { display: none; }
 .add-fab-menu button { min-height: 44px; justify-content: start; border-radius: 14px; background: transparent; box-shadow: none; text-align: left; }
 .add-fab-menu button:hover { background: #f0fdf4; filter: none; }
-.app-toast { position: fixed; z-index: 60; left: 50%; bottom: max(24px, env(safe-area-inset-bottom)); transform: translateX(-50%); max-width: min(440px, calc(100vw - 32px)); padding: 0.7rem 1rem; border-radius: 999px; background: rgba(23, 48, 31, 0.94); color: #ffffff; font-weight: 800; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.24); }
-.app-toast[hidden] { display: none; }
-
 .map-status { position: fixed; z-index: 24; left: 14px; bottom: max(14px, env(safe-area-inset-bottom)); max-width: min(560px, calc(100vw - 112px)); border: 0; border-radius: 999px; padding: 0.7rem 1rem; background: rgba(255, 255, 255, 0.94); box-shadow: 0 8px 22px rgba(15, 23, 42, 0.12); font-size: 0.9rem; }
 .drawer-backdrop { position: fixed; inset: 0; z-index: 39; background: rgba(15, 23, 42, 0.24); }
 .drawer-backdrop[hidden] { display: none; }

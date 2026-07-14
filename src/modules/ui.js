@@ -64,7 +64,6 @@ app.innerHTML = `
       </div>
 
       <p id="mapStatus" class="status map-status">Google Mapsを読み込み中です。</p>
-      <div id="appToast" class="app-toast" role="status" aria-live="polite" hidden></div>
       <aside id="placeDetailPanel" class="place-detail-panel" aria-live="polite" hidden></aside>
     </section>
 
@@ -231,7 +230,6 @@ app.innerHTML = `
 
 const elements = {
   mapStatus: document.querySelector('#mapStatus'),
-  appToast: document.querySelector('#appToast'),
   mapSetup: document.querySelector('#mapSetup'),
   menuButton: document.querySelector('#menuButton'),
   closeDrawerButton: document.querySelector('#closeDrawerButton'),
@@ -462,7 +460,7 @@ function bindEvents() {
     elements.storeForm.reset();
     renderStoreList();
     renderMarkers();
-    fitMapToVisibleData({ items: [store] });
+    fitMapToVisibleData();
     focusStore(store.id);
   });
 }
@@ -490,8 +488,7 @@ async function importPhotoFiles(event) {
     renderPhotoReview();
     renderPlaceCandidates();
     renderMarkers();
-    const importedOrigins = photoPlaceCandidates.filter((group) => !previousCandidateIds.has(group.id)).map((group) => group.origin);
-    fitMapToVisibleData({ items: importedOrigins });
+    fitMapToVisibleData({ items: photoPlaceCandidates.filter((group) => !previousCandidateIds.has(group.id)).map((group) => group.origin) });
   } finally {
     elements.photoStatus.textContent = formatPhotoImportStatus(stats, results);
     event.target.value = '';
@@ -1232,11 +1229,8 @@ function fitMapToVisibleData(options = {}) {
   if (!map || !window.google?.maps) return;
   const sourceItems = Array.isArray(options.items) ? options.items : [...visibleStorePlaces(), ...visibleFlyerPlaces()];
   const { validItems, invalidCount, reversedCount } = validFitBoundsItems(sourceItems);
-  if (reversedCount) {
-    console.warn('緯度経度が逆転している可能性があります', { count: reversedCount });
-    showMapToast('緯度経度が逆転している可能性があります');
-  }
-  if (invalidCount) showMapToast(`${invalidCount}件の地点は座標異常のため地図表示対象外です`);
+  if (reversedCount) console.warn('緯度経度が逆転している可能性があります', { count: reversedCount });
+  if (invalidCount) console.warn(`${invalidCount}件の地点は座標異常のため地図表示対象外です`);
 
   if (!validItems.length) {
     map.setCenter(DEFAULT_CENTER);
@@ -1245,13 +1239,13 @@ function fitMapToVisibleData(options = {}) {
   }
 
   if (validItems.length === 1) {
-    map.setCenter({ lat: Number(validItems[0].lat), lng: Number(validItems[0].lng) });
+    map.setCenter({ lat: validItems[0].lat, lng: validItems[0].lng });
     map.setZoom(15);
     return;
   }
 
   const bounds = new google.maps.LatLngBounds();
-  validItems.forEach((item) => bounds.extend({ lat: Number(item.lat), lng: Number(item.lng) }));
+  validItems.forEach((item) => bounds.extend({ lat: item.lat, lng: item.lng }));
   map.fitBounds(bounds, 64);
 }
 
@@ -1310,14 +1304,6 @@ function saveCurrentMapView() {
   const lng = center.lng();
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
   saveMapView({ lat, lng, zoom: map.getZoom() ?? DEFAULT_ZOOM, updatedAt: new Date().toISOString() });
-}
-
-function showMapToast(message) {
-  if (!elements.appToast) return;
-  elements.appToast.textContent = message;
-  elements.appToast.hidden = false;
-  clearTimeout(showMapToast.timer);
-  showMapToast.timer = setTimeout(() => { elements.appToast.hidden = true; }, 3200);
 }
 
 function markerIconForStore(store) {
