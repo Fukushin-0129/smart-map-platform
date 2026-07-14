@@ -1,4 +1,4 @@
-import { ASSIGNEES_STORAGE_KEY, DEFAULT_ASSIGNEES, DISPLAY_MODE_STORAGE_KEY, FLYER_STORAGE_KEY, LAYERS_STORAGE_KEY, LAYER_VISIBILITY_STORAGE_KEY, PHOTO_IMPORT_STORAGE_KEY, STORAGE_KEY } from './constants.js';
+import { ASSIGNEES_STORAGE_KEY, DEFAULT_ASSIGNEES, DISPLAY_MODE_STORAGE_KEY, FLYER_STORAGE_KEY, LAYERS_STORAGE_KEY, LAYER_VISIBILITY_STORAGE_KEY, MAP_VIEW_STORAGE_KEY, PHOTO_IMPORT_STORAGE_KEY, STORAGE_KEY } from './constants.js';
 
 export function loadStores() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { return []; }
@@ -35,3 +35,10 @@ export function saveFlyerApartments(flyerApartments) { localStorage.setItem(FLYE
 export function saveFlyerAssignees(flyerAssignees) { localStorage.setItem(ASSIGNEES_STORAGE_KEY, JSON.stringify(flyerAssignees)); }
 export function loadDisplayMode() { try { return localStorage.getItem(DISPLAY_MODE_STORAGE_KEY) || 'all'; } catch { return 'all'; } }
 export function saveDisplayMode(displayMode) { localStorage.setItem(DISPLAY_MODE_STORAGE_KEY, displayMode); }
+export function loadMapView() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(MAP_VIEW_STORAGE_KEY));
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch { return null; }
+}
+export function saveMapView(mapView) { localStorage.setItem(MAP_VIEW_STORAGE_KEY, JSON.stringify(mapView)); }
