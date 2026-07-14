@@ -133,41 +133,24 @@ npm run check
 
 ### 接続設定
 
-`config.js` に次の値を設定します。URLクエリの `?supabaseUrl=...&supabaseAnonKey=...` でも一時的に指定できます。
+Vercelや静的ビルドでは次の環境変数を設定します。値はコードへ直書きしません。
 
 ```js
-window.SMART_MAP_SUPABASE_URL = 'https://YOUR_PROJECT.supabase.co';
-window.SMART_MAP_SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
 ```
 
-Vercelなどで公開する場合は、ビルド後の `dist/config.js` に同等の値を配信するか、公開URLのクエリパラメータで動作確認してください。
+ビルド時に `scripts/build.mjs` が `VITE_SUPABASE_URL` と `VITE_SUPABASE_ANON_KEY` を `dist/config.js` へ反映します。未設定の場合は従来どおりlocalStorageのみで動作します。
 
 ### 最小テーブル
 
-最初の動作確認用SQL例です。認証なしで確認できるようにする場合でも、本番運用では必ず認証とRLS（Row Level Security）を設計してください。
-
-```sql
-create table if not exists public.flyer_places (
-  id text primary key,
-  name text not null,
-  address text,
-  latitude double precision not null,
-  longitude double precision not null,
-  status text default '未配布',
-  assignee text,
-  distributed_at date,
-  quantity integer,
-  memo text,
-  created_at timestamptz default now(),
-  updated_at timestamptz default now()
-);
-```
+動作確認用SQLは `supabase/flyer_places.sql` にあります。認証なしで確認できる開発用RLSポリシーを含みますが、本番運用では必ず認証とRLS（Row Level Security）を設計してください。
 
 ### 動作
 
-- 起動時にSupabaseから `flyer_places` を読み込み、localStorageの `smart-map-platform:flyer-apartments` とマージします。
-- localStorageに既存のチラシ配布データがある場合、初回起動時にSupabaseへupsertして移行します。
-- 配布状況、配布日、担当者、配布枚数、メモ、CSV取り込み後のチラシ配布データはlocalStorageへ保存しつつSupabaseにもupsertします。
+- 起動時にSupabaseから `flyer_places` を読み込み、localStorageの `smart-map-platform:flyer-apartments` と `updatedAt` の新しい方を採用してマージします。
+- Supabase側が空でlocalStorageに既存のチラシ配布データがある場合、チラシ配布一覧の「共有データへ移行」ボタンから明示的にupsert移行できます。
+- 配布状況、配布日、担当者、配布枚数、メモ、CSV取り込み後のチラシ配布データはlocalStorageへ保存しつつSupabaseにもupsertします。保存失敗分は `smart-map-platform:flyer-sync-queue` に同期待ちとして残します。
 - Supabase接続・保存に失敗してもlocalStorageバックアップを使うため、アプリが真っ白にならない設計です。
 
 > **重要:** 今回は動作確認を優先して、認証なしでも使える最小構成にしています。本番運用ではSupabase Authなどの認証、RLSポリシー、書き込み権限の制限、プロジェクトごとのデータ分離を必ず設定してください。

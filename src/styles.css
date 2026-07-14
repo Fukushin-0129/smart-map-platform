@@ -317,3 +317,5 @@ body { background: #edf3ef; }
 @media (max-width: 560px) {
   .management-drawer { width: min(88vw, 360px); }
 }
+.flyer-sync-status { margin: 0 0 0.65rem; color: #31553b; font-size: 0.86rem; font-weight: 800; }
+.flyer-sync-button { margin-bottom: 0.75rem; width: 100%; }
