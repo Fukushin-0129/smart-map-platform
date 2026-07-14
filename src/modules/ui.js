@@ -322,7 +322,7 @@ async function initializeFlyerStorage() {
     flyerApartments = mergeFlyerSources(localFlyers, result.places);
     saveFlyerApartments(flyerApartments);
     updateMigrationButton(localFlyers.length > 0);
-    updateFlyerSyncStatus('初回同期前: localStorageデータを確認してください');
+    updateFlyerSyncStatus(`初回同期前: localStorageデータ ${localFlyers.length}件を確認してください`);
   }
 
   await flushFlyerSyncQueue();
