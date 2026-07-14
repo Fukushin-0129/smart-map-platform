@@ -5,6 +5,8 @@ const distDir = 'dist';
 const filesToCopy = ['index.html', 'src/main.js', 'src/styles.css'];
 const directoriesToCopy = ['src/modules'];
 const googleMapsApiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.VITE_GOOGLE_MAPS_API_KEY || '';
+const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
 
 await rm(distDir, { recursive: true, force: true });
 
@@ -21,7 +23,7 @@ for (const directory of directoriesToCopy) {
 
 await writeFile(
   join(distDir, 'config.js'),
-  `window.SMART_MAP_GOOGLE_MAPS_API_KEY = '${escapeJavaScript(googleMapsApiKey)}';\n`,
+  `window.SMART_MAP_GOOGLE_MAPS_API_KEY = '${escapeJavaScript(googleMapsApiKey)}';\nwindow.SMART_MAP_SUPABASE_URL = '${escapeJavaScript(supabaseUrl)}';\nwindow.SMART_MAP_SUPABASE_ANON_KEY = '${escapeJavaScript(supabaseAnonKey)}';\n`,
 );
 
 console.log('Built static site in dist/.');

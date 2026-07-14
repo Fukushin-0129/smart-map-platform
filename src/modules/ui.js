@@ -1,6 +1,7 @@
 import { CANDIDATE_STORE_METERS, DEFAULT_ASSIGNEES, DEFAULT_CENTER, DEFAULT_ZOOM, FLYER_LAYER, FLYER_STATUS_COLORS, FLYER_STATUSES, GOOGLE_MAPS_API_KEY, LAYER_COLORS, NEAR_STORE_METERS } from './constants.js';
 import { loadDisplayMode, loadFlyerApartments, loadFlyerAssignees, loadLayers, loadLayerVisibility, loadMapView, loadPhotoImports, loadStores, saveDisplayMode, saveFlyerApartments, saveFlyerAssignees, saveLayers, saveLayerVisibility, saveMapView, savePhotoImports, saveStores } from './storage.js';
 import { distanceMeters, escapeHtml, isValidCoordinate, readFileAsDataUrl } from './utils.js';
+import { isSupabaseConfigured, loadFlyerPlacesFromSupabase, saveFlyerPlacesToSupabase } from './supabaseFlyers.js';
 
 let map;
 let userMarker;
@@ -286,7 +287,44 @@ const elements = {
   lng: document.querySelector('#lng'),
 };
 
+async function initializeFlyerStorage() {
+  const localFlyers = loadFlyerApartments().map((apt) => ({ ...apt, status: normalizeFlyerStatus(apt.status, apt.distributionDate) }));
+  flyerApartments = localFlyers;
+
+  if (!isSupabaseConfigured()) return;
+
+  const result = await loadFlyerPlacesFromSupabase();
+  if (!result.ok) {
+    console.warn(`Supabase接続に失敗したためlocalStorageを使用します: ${result.reason}`);
+    return;
+  }
+
+  flyerApartments = mergeFlyerSources(localFlyers, result.places);
+  saveFlyerApartments(flyerApartments);
+
+  if (localFlyers.length) {
+    const migration = await saveFlyerPlacesToSupabase(flyerApartments);
+    if (!migration.ok) console.warn(`localStorageからSupabaseへの初回移行に失敗しました: ${migration.reason}`);
+  }
+}
+
+function mergeFlyerSources(localFlyers, remoteFlyers) {
+  const merged = new Map();
+  localFlyers.forEach((apt) => merged.set(apt.id, apt));
+  remoteFlyers.forEach((apt) => merged.set(apt.id, { ...(merged.get(apt.id) || {}), ...apt }));
+  return Array.from(merged.values());
+}
+
+function persistFlyerApartments() {
+  saveFlyerApartments(flyerApartments);
+  if (!isSupabaseConfigured()) return;
+  saveFlyerPlacesToSupabase(flyerApartments).then((result) => {
+    if (!result.ok) showToast(`Supabase保存に失敗しました。localStorageには保存済みです: ${result.reason}`);
+  });
+}
+
 export async function initializeApp() {
+  await initializeFlyerStorage();
   renderCategoryLayerOptions();
   renderLayerList();
   renderAssignees();
@@ -1672,7 +1710,7 @@ async function importCsvFile(event) {
     const rows = parseCsv(await file.text());
     const importedOnly = rowsToFlyerApartments(rows);
     flyerApartments = mergeFlyerApartments(importedOnly);
-    saveFlyerApartments(flyerApartments);
+    persistFlyerApartments();
     renderLayerList();
     renderFlyerList();
     renderMarkers();
@@ -1896,7 +1934,7 @@ function updateFlyer(id, patch, options = {}) {
   }
   flyerRoutes = flyerRoutes.map((route) => ({ ...route, items: route.items.map((apt) => apt.id === id ? { ...apt, ...normalizedPatch } : apt).filter((apt) => apt.status === '未配布') })).filter((route) => route.items.length);
   flyerApartments = flyerApartments.map((apt) => apt.id === id ? { ...apt, ...normalizedPatch, updatedAt: new Date().toISOString() } : apt);
-  saveFlyerApartments(flyerApartments);
+  persistFlyerApartments();
   renderFlyerList();
   renderFlyerRoutes();
   renderMarkers();
@@ -1938,7 +1976,7 @@ function bindFlyerDetailControls(root) {
 function todayString() {
   return new Date().toISOString().slice(0, 10);
 }
-async function addFlyerPhoto(id, file) { if (!file) return; const photo = { id: crypto.randomUUID(), name: file.name, dataUrl: await readFileAsDataUrl(file), importedAt: new Date().toISOString() }; flyerApartments = flyerApartments.map((apt) => apt.id === id ? { ...apt, photos: [photo, ...(apt.photos || [])] } : apt); saveFlyerApartments(flyerApartments); renderFlyerList(); renderMarkers(); }
+async function addFlyerPhoto(id, file) { if (!file) return; const photo = { id: crypto.randomUUID(), name: file.name, dataUrl: await readFileAsDataUrl(file), importedAt: new Date().toISOString() }; flyerApartments = flyerApartments.map((apt) => apt.id === id ? { ...apt, photos: [photo, ...(apt.photos || [])] } : apt); persistFlyerApartments(); renderFlyerList(); renderMarkers(); }
 function markerIconForFlyer(apt) {
   const route = routeMetaForFlyer(apt.id);
   if (route) {

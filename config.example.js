@@ -1,1 +1,3 @@
-window.SMART_MAP_GOOGLE_MAPS_API_KEY = 'your_google_maps_api_key';
+window.SMART_MAP_GOOGLE_MAPS_API_KEY = '';
+window.SMART_MAP_SUPABASE_URL = '';
+window.SMART_MAP_SUPABASE_ANON_KEY = '';
