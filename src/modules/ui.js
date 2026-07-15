@@ -22,6 +22,7 @@ let geocoder = null;
 let flyerRegistrationMode = 'menu';
 let flyerSearchQuery = '';
 let flyerSearchPredictions = [];
+let isFlyerSearchComposing = false;
 let selectedFlyerPlace = null;
 let flyerDuplicateCandidates = [];
 let allowDuplicateFlyerRegistration = false;
@@ -652,6 +653,7 @@ function closeFlyerRegistrationPanel() {
   elements.flyerRegistrationPanel.hidden = true;
   flyerRegistrationMode = 'menu';
   flyerSearchPredictions = [];
+  isFlyerSearchComposing = false;
   selectedFlyerPlace = null;
   flyerDuplicateCandidates = [];
   allowDuplicateFlyerRegistration = false;
@@ -708,7 +710,23 @@ function bindFlyerRegistrationPanel() {
   root.querySelector('[data-close-flyer-registration]')?.addEventListener('click', closeFlyerRegistrationPanel);
   root.querySelectorAll('[data-registration-mode]').forEach((b) => b.addEventListener('click', () => { flyerRegistrationMode = b.dataset.registrationMode; renderFlyerRegistrationPanel(); }));
   root.querySelectorAll('[data-registration-current]').forEach((b) => b.addEventListener('click', startCurrentLocationFlyerRegistration));
-  root.querySelector('#flyerPlaceSearchInput')?.addEventListener('input', (e) => { flyerSearchQuery = e.target.value; searchFlyerPlacePredictions(); });
+  const flyerSearchInput = root.querySelector('#flyerPlaceSearchInput');
+  flyerSearchInput?.addEventListener('compositionstart', () => {
+    isFlyerSearchComposing = true;
+  });
+  flyerSearchInput?.addEventListener('compositionend', (event) => {
+    isFlyerSearchComposing = false;
+    flyerSearchQuery = event.target.value;
+    searchFlyerPlacePredictions();
+  });
+  flyerSearchInput?.addEventListener('input', (event) => {
+    if (event.isComposing || isFlyerSearchComposing) return;
+    flyerSearchQuery = event.target.value;
+    searchFlyerPlacePredictions();
+  });
+  flyerSearchInput?.addEventListener('keydown', (event) => {
+    if (event.isComposing || event.keyCode === 229) return;
+  });
   root.querySelectorAll('[data-select-flyer-prediction]').forEach((b) => b.addEventListener('click', () => selectFlyerPrediction(Number(b.dataset.selectFlyerPrediction))));
   root.querySelectorAll('[data-open-duplicate-flyer]').forEach((b) => b.addEventListener('click', () => { closeFlyerRegistrationPanel(); focusFlyer(b.dataset.openDuplicateFlyer); }));
   root.querySelector('[data-allow-duplicate]')?.addEventListener('change', (e) => { allowDuplicateFlyerRegistration = e.target.checked; });
@@ -719,9 +737,11 @@ let flyerSearchTimer;
 function searchFlyerPlacePredictions() {
   clearTimeout(flyerSearchTimer);
   const input = flyerSearchQuery.trim();
+  if (isFlyerSearchComposing) return;
   if (!autocompleteService || input.length < 2) { flyerSearchPredictions = []; renderFlyerRegistrationPanel(); return; }
   flyerSearchTimer = setTimeout(() => autocompleteService.getPlacePredictions({ input, language: 'ja', componentRestrictions: { country: 'jp' }, location: new google.maps.LatLng(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng), radius: 20000 }, (predictions, status) => {
     flyerSearchPredictions = status === google.maps.places.PlacesServiceStatus.OK ? (predictions || []) : [];
+    if (isFlyerSearchComposing) return;
     renderFlyerRegistrationPanel();
     const inputEl = elements.flyerRegistrationPanel.querySelector('#flyerPlaceSearchInput');
     inputEl?.focus();
