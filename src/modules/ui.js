@@ -22,6 +22,10 @@ let geocoder = null;
 let flyerRegistrationMode = 'menu';
 let flyerSearchQuery = '';
 let flyerSearchPredictions = [];
+let flyerSearchScopeIndex = 0;
+let flyerSearchStatus = '';
+let flyerSearchRequestId = 0;
+let isFlyerSearchComposing = false;
 let selectedFlyerPlace = null;
 let flyerDuplicateCandidates = [];
 let allowDuplicateFlyerRegistration = false;
@@ -29,6 +33,16 @@ let tempFlyerMarker = null;
 let keywordPlaceCandidates = [];
 let photoPlaceCandidates = [];
 let flyerRoutes = [];
+
+const FLYER_SEARCH_MAX_RESULTS = 15;
+const FLYER_SEARCH_DEBOUNCE_MS = 400;
+const FLYER_SEARCH_AREAS = ['吹田市', '豊中市', '茨木市', '箕面市'];
+const FLYER_SEARCH_SCOPES = [
+  { label: '地図周辺', status: '周辺の候補を検索しています', radius: 12000, areas: [] },
+  { label: '北摂周辺', status: '北摂周辺まで範囲を広げています', radius: 28000, areas: FLYER_SEARCH_AREAS },
+  { label: '大阪府内', status: '大阪府内まで範囲を広げています', radius: 65000, areas: ['大阪府', ...FLYER_SEARCH_AREAS] },
+  { label: '関西圏', status: '関西圏まで範囲を広げています', radius: 140000, areas: ['関西', '大阪府', '兵庫県', '京都府', '奈良県'] },
+];
 
 const DISPLAY_MODES = [
   { id: 'all', label: 'すべて表示' },
@@ -652,6 +666,10 @@ function closeFlyerRegistrationPanel() {
   elements.flyerRegistrationPanel.hidden = true;
   flyerRegistrationMode = 'menu';
   flyerSearchPredictions = [];
+  flyerSearchScopeIndex = 0;
+  flyerSearchStatus = '';
+  flyerSearchRequestId += 1;
+  isFlyerSearchComposing = false;
   selectedFlyerPlace = null;
   flyerDuplicateCandidates = [];
   allowDuplicateFlyerRegistration = false;
@@ -672,7 +690,9 @@ function renderFlyerRegistrationPanel() {
     <div class="flyer-registration-search" ${flyerRegistrationMode === 'search' ? '' : 'hidden'}>
       <label>マンション名・住所を検索<input id="flyerPlaceSearchInput" value="${escapeHtml(flyerSearchQuery)}" placeholder="マンション名・住所を検索" autocomplete="off" /></label>
       <p class="hint">例: ワコーレ / ワコーレ千里 / 吹田市山田東 ワコーレ</p>
+      ${flyerSearchStatus ? `<p class="status">${escapeHtml(flyerSearchStatus)}</p>` : ''}
       <div class="flyer-place-candidates">${renderFlyerPredictions()}</div>
+      ${renderFlyerSearchHelp()}
     </div>
     <div class="flyer-registration-map" ${flyerRegistrationMode === 'map' ? '' : 'hidden'}>
       <p class="hint">地図上をクリックして位置を指定してください。検索に出ないマンションは名前だけ入力して登録できます。</p>
@@ -685,8 +705,15 @@ function renderFlyerRegistrationPanel() {
 function renderFlyerPredictions() {
   if (!autocompleteService) return '<p class="empty">検索機能を利用できません。地図から位置を指定してください</p>';
   if (flyerSearchQuery.trim().length < 2) return '<p class="empty">2文字以上入力するとGoogle Place候補を表示します。</p>';
-  if (!flyerSearchPredictions.length) return '<div class="empty"><p>候補が見つかりません。</p><button type="button" data-registration-mode="map">地図上をクリックして位置指定</button><button type="button" data-registration-current>現在地を使用</button></div>';
-  return flyerSearchPredictions.map((p, i) => `<button type="button" class="flyer-place-candidate" data-select-flyer-prediction="${i}"><strong>${escapeHtml(p.structured_formatting?.main_text || p.description)}</strong><span>${escapeHtml(p.structured_formatting?.secondary_text || p.description)}</span><small>Google Place候補</small></button>`).join('');
+  if (!flyerSearchPredictions.length && !flyerSearchStatus) return '<div class="empty"><p>候補が見つかりません。住所を追加して検索すると見つかりやすくなります。</p><button type="button" data-registration-mode="map">地図上をクリックして位置指定</button><button type="button" data-registration-current>現在地を使用</button></div>';
+  return flyerSearchPredictions.map((p, i) => `<button type="button" class="flyer-place-candidate" data-select-flyer-prediction="${i}"><strong>${escapeHtml(p.name || '名称未設定')}</strong><span>${escapeHtml(p.address || '住所不明')}</span><span>${escapeHtml(p.city || '市区町村不明')} / ${escapeHtml(formatDistance(p.distanceMeters))}</span><small>${escapeHtml(p.sources.join(' + '))}</small></button>`).join('');
+}
+
+function renderFlyerSearchHelp() {
+  if (flyerSearchQuery.trim().length < 2) return '';
+  const nextScope = FLYER_SEARCH_SCOPES[Math.min(flyerSearchScopeIndex + 1, FLYER_SEARCH_SCOPES.length - 1)];
+  const examples = [flyerSearchQuery, `${flyerSearchQuery} 吹田市`, `${flyerSearchQuery} 千里`, `${flyerSearchQuery} 津雲台`];
+  return `<div class="flyer-search-help"><button type="button" data-expand-flyer-search ${flyerSearchScopeIndex >= FLYER_SEARCH_SCOPES.length - 1 ? 'disabled' : ''}>検索範囲を広げる${nextScope ? `（${escapeHtml(nextScope.label)}）` : ''}</button><p class="hint">住所を追加して検索: ${examples.map(escapeHtml).join(' / ')}</p></div>`;
 }
 
 function renderFlyerSelectedPlace(place, assigneeOptions) {
@@ -708,7 +735,26 @@ function bindFlyerRegistrationPanel() {
   root.querySelector('[data-close-flyer-registration]')?.addEventListener('click', closeFlyerRegistrationPanel);
   root.querySelectorAll('[data-registration-mode]').forEach((b) => b.addEventListener('click', () => { flyerRegistrationMode = b.dataset.registrationMode; renderFlyerRegistrationPanel(); }));
   root.querySelectorAll('[data-registration-current]').forEach((b) => b.addEventListener('click', startCurrentLocationFlyerRegistration));
-  root.querySelector('#flyerPlaceSearchInput')?.addEventListener('input', (e) => { flyerSearchQuery = e.target.value; searchFlyerPlacePredictions(); });
+  const flyerSearchInput = root.querySelector('#flyerPlaceSearchInput');
+  flyerSearchInput?.addEventListener('compositionstart', () => {
+    isFlyerSearchComposing = true;
+  });
+  flyerSearchInput?.addEventListener('compositionend', (event) => {
+    isFlyerSearchComposing = false;
+    flyerSearchQuery = event.target.value;
+    flyerSearchScopeIndex = 0;
+    searchFlyerPlacePredictions();
+  });
+  flyerSearchInput?.addEventListener('input', (event) => {
+    if (event.isComposing || isFlyerSearchComposing) return;
+    flyerSearchQuery = event.target.value;
+    flyerSearchScopeIndex = 0;
+    searchFlyerPlacePredictions();
+  });
+  flyerSearchInput?.addEventListener('keydown', (event) => {
+    if (event.isComposing || event.keyCode === 229) return;
+  });
+  root.querySelector('[data-expand-flyer-search]')?.addEventListener('click', () => { flyerSearchScopeIndex = Math.min(flyerSearchScopeIndex + 1, FLYER_SEARCH_SCOPES.length - 1); searchFlyerPlacePredictions({ immediate: true }); });
   root.querySelectorAll('[data-select-flyer-prediction]').forEach((b) => b.addEventListener('click', () => selectFlyerPrediction(Number(b.dataset.selectFlyerPrediction))));
   root.querySelectorAll('[data-open-duplicate-flyer]').forEach((b) => b.addEventListener('click', () => { closeFlyerRegistrationPanel(); focusFlyer(b.dataset.openDuplicateFlyer); }));
   root.querySelector('[data-allow-duplicate]')?.addEventListener('change', (e) => { allowDuplicateFlyerRegistration = e.target.checked; });
@@ -716,25 +762,235 @@ function bindFlyerRegistrationPanel() {
 }
 
 let flyerSearchTimer;
-function searchFlyerPlacePredictions() {
+function searchFlyerPlacePredictions(options = {}) {
   clearTimeout(flyerSearchTimer);
   const input = flyerSearchQuery.trim();
-  if (!autocompleteService || input.length < 2) { flyerSearchPredictions = []; renderFlyerRegistrationPanel(); return; }
-  flyerSearchTimer = setTimeout(() => autocompleteService.getPlacePredictions({ input, language: 'ja', componentRestrictions: { country: 'jp' }, location: new google.maps.LatLng(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng), radius: 20000 }, (predictions, status) => {
-    flyerSearchPredictions = status === google.maps.places.PlacesServiceStatus.OK ? (predictions || []) : [];
+  if (isFlyerSearchComposing) return;
+  if (!autocompleteService || input.length < 2) {
+    flyerSearchPredictions = [];
+    flyerSearchStatus = '';
+    renderFlyerRegistrationPanel();
+    return;
+  }
+  const delay = options.immediate ? 0 : FLYER_SEARCH_DEBOUNCE_MS;
+  flyerSearchTimer = setTimeout(() => runFlyerPlaceSearch(input), delay);
+}
+
+async function runFlyerPlaceSearch(input) {
+  const requestId = ++flyerSearchRequestId;
+  const center = map?.getCenter();
+  const centerLatLng = center ? { lat: center.lat(), lng: center.lng() } : DEFAULT_CENTER;
+  const scope = FLYER_SEARCH_SCOPES[flyerSearchScopeIndex] || FLYER_SEARCH_SCOPES[0];
+  flyerSearchStatus = scope.status;
+  renderFlyerRegistrationPanel();
+
+  try {
+    const searches = [];
+    const autocompleteResults = await getFlyerAutocompleteCandidates(input, centerLatLng, scope);
+    searches.push(...autocompleteResults);
+    let merged = mergeFlyerPlaceCandidates(searches, input, centerLatLng);
+
+    if (shouldRunFlyerTextSearch(merged, input)) {
+      flyerSearchStatus = scope.status.includes('広げています') ? scope.status : '周辺の候補を検索しています';
+      renderFlyerRegistrationPanel();
+      const textResults = await getFlyerTextSearchCandidates(input, centerLatLng, scope);
+      searches.push(...textResults);
+      merged = mergeFlyerPlaceCandidates(searches, input, centerLatLng);
+    }
+
+    if (merged.length < 10 && flyerSearchScopeIndex < FLYER_SEARCH_SCOPES.length - 1) {
+      flyerSearchScopeIndex += 1;
+      const expandedScope = FLYER_SEARCH_SCOPES[flyerSearchScopeIndex];
+      flyerSearchStatus = expandedScope.status;
+      renderFlyerRegistrationPanel();
+      const expandedResults = await getFlyerTextSearchCandidates(input, centerLatLng, expandedScope);
+      searches.push(...expandedResults);
+      merged = mergeFlyerPlaceCandidates(searches, input, centerLatLng);
+    }
+
+    if (requestId !== flyerSearchRequestId || isFlyerSearchComposing) return;
+    flyerSearchPredictions = merged.slice(0, FLYER_SEARCH_MAX_RESULTS);
+    flyerSearchStatus = flyerSearchPredictions.length ? `${flyerSearchPredictions.length}件の候補が見つかりました。` : '';
+  } catch (error) {
+    if (requestId !== flyerSearchRequestId) return;
+    console.error('チラシ配布先のPlaces検索に失敗しました。', error);
+    flyerSearchPredictions = [];
+    flyerSearchStatus = '候補検索に失敗しました。入力語や住所を変えて再検索してください。';
+  } finally {
+    if (requestId !== flyerSearchRequestId || isFlyerSearchComposing) return;
     renderFlyerRegistrationPanel();
     const inputEl = elements.flyerRegistrationPanel.querySelector('#flyerPlaceSearchInput');
     inputEl?.focus();
-    inputEl?.setSelectionRange(inputEl.value.length, inputEl.value.length);
-  }), 250);
+  }
 }
 
-function selectFlyerPrediction(index) {
+function shouldRunFlyerTextSearch(candidates, input) {
+  if (candidates.length < 10) return true;
+  const normalizedInput = normalizeSearchText(input);
+  return candidates.slice(0, 5).every((candidate) => normalizeSearchText(candidate.name).startsWith(normalizedInput));
+}
+
+function getFlyerAutocompleteCandidates(input, centerLatLng, scope) {
+  return new Promise((resolve) => {
+    autocompleteService.getPlacePredictions({
+      input,
+      language: 'ja',
+      componentRestrictions: { country: 'jp' },
+      location: new google.maps.LatLng(centerLatLng.lat, centerLatLng.lng),
+      radius: scope.radius,
+      types: ['establishment', 'geocode'],
+    }, async (predictions, status) => {
+      if (status !== google.maps.places.PlacesServiceStatus.OK || !predictions?.length) {
+        resolve([]);
+        return;
+      }
+      const detailed = await Promise.all(predictions.slice(0, FLYER_SEARCH_MAX_RESULTS).map((prediction, index) => getFlyerPlaceDetails(prediction.place_id).then((place) => place ? flyerCandidateFromPlace(place, 'Autocomplete', index) : flyerCandidateFromPrediction(prediction, index))));
+      resolve(detailed.filter(Boolean));
+    });
+  });
+}
+
+async function getFlyerTextSearchCandidates(input, centerLatLng, scope) {
+  if (!placesService) return [];
+  const queries = buildFlyerTextSearchQueries(input, centerLatLng, scope);
+  const groups = await Promise.all(queries.map((query, queryIndex) => textSearchFlyerPlaces({
+    query,
+    fields: ['place_id', 'name', 'formatted_address', 'geometry', 'types'],
+    location: new google.maps.LatLng(centerLatLng.lat, centerLatLng.lng),
+    radius: scope.radius,
+  }).then((places) => places.map((place, index) => flyerCandidateFromPlace(place, 'Text Search', queryIndex * 20 + index)))));
+  return groups.flat();
+}
+
+function buildFlyerTextSearchQueries(input, centerLatLng, scope) {
+  const terms = new Set([input, ...scope.areas.map((area) => `${input} ${area}`)]);
+  const centerCity = getCityFromAddress(findNearestKnownAddress(centerLatLng));
+  if (centerCity) terms.add(`${input} ${centerCity}`);
+  return [...terms].slice(0, 8);
+}
+
+function findNearestKnownAddress(centerLatLng) {
+  return [...flyerApartments, ...stores]
+    .filter((place) => place.address && isValidCoordinate(place.lat, place.lng))
+    .map((place) => ({ address: place.address, distance: distanceMeters(centerLatLng.lat, centerLatLng.lng, place.lat, place.lng) }))
+    .sort((a, b) => a.distance - b.distance)[0]?.address || '';
+}
+
+function textSearchFlyerPlaces(request) {
+  return new Promise((resolve) => {
+    placesService.textSearch(request, (results, status) => {
+      if (status === google.maps.places.PlacesServiceStatus.OK || status === google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
+        resolve((results || []).slice(0, FLYER_SEARCH_MAX_RESULTS));
+        return;
+      }
+      resolve([]);
+    });
+  });
+}
+
+function getFlyerPlaceDetails(placeId) {
+  if (!placeId || !placesService) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    placesService.getDetails({ placeId, fields: ['place_id', 'name', 'formatted_address', 'geometry', 'formatted_phone_number', 'website'] }, (place, status) => {
+      resolve(status === google.maps.places.PlacesServiceStatus.OK ? place : null);
+    });
+  });
+}
+
+function flyerCandidateFromPrediction(prediction, order) {
+  return {
+    placeId: prediction.place_id || '',
+    name: prediction.structured_formatting?.main_text || prediction.description || '',
+    address: prediction.structured_formatting?.secondary_text || prediction.description || '',
+    city: getCityFromAddress(prediction.description || ''),
+    lat: null,
+    lng: null,
+    sources: ['Autocomplete'],
+    order,
+  };
+}
+
+function flyerCandidateFromPlace(place, source, order) {
+  const position = normalizePlacePosition(place);
+  return {
+    placeId: place.place_id || '',
+    name: place.name || '',
+    address: place.formatted_address || place.vicinity || '',
+    city: getCityFromAddress(place.formatted_address || place.vicinity || ''),
+    lat: position?.lat ?? null,
+    lng: position?.lng ?? null,
+    sources: [source],
+    order,
+  };
+}
+
+function mergeFlyerPlaceCandidates(candidates, input, centerLatLng) {
+  const merged = new Map();
+  candidates.forEach((candidate) => {
+    const key = flyerCandidateKey(candidate);
+    const existing = merged.get(key);
+    if (existing) {
+      const sources = [...new Set([...existing.sources, ...candidate.sources])];
+      if (!existing.lat && candidate.lat) Object.assign(existing, candidate);
+      existing.sources = sources;
+      return;
+    }
+    const distance = isValidCoordinate(candidate.lat, candidate.lng) ? distanceMeters(centerLatLng.lat, centerLatLng.lng, candidate.lat, candidate.lng) : Number.POSITIVE_INFINITY;
+    merged.set(key, { ...candidate, distanceMeters: distance, score: flyerCandidateScore(candidate, input, distance) });
+  });
+  return [...merged.values()].sort((a, b) => b.score - a.score || a.distanceMeters - b.distanceMeters || a.order - b.order);
+}
+
+function flyerCandidateKey(candidate) {
+  if (candidate.placeId) return `place:${candidate.placeId}`;
+  const latLng = isValidCoordinate(candidate.lat, candidate.lng) ? `${Number(candidate.lat).toFixed(6)},${Number(candidate.lng).toFixed(6)}` : '';
+  return `text:${normalizeSearchText(candidate.name)}|${normalizeSearchText(candidate.address)}|${latLng}`;
+}
+
+function flyerCandidateScore(candidate, input, distance) {
+  const query = normalizeSearchText(input);
+  const name = normalizeSearchText(candidate.name);
+  const address = normalizeSearchText(candidate.address);
+  let score = 0;
+  if (name === query) score += 120;
+  else if (name.startsWith(query)) score += 90;
+  else if (name.includes(query)) score += 70;
+  if (address.includes(query)) score += 25;
+  if (distance < 3000) score += 20;
+  else if (distance < 10000) score += 12;
+  else if (distance < 30000) score += 6;
+  return score;
+}
+
+function normalizeSearchText(value) {
+  return String(value || '').normalize('NFKC').toLowerCase().replace(/[\s・ー-]/g, '').replace(/[ぁ-ん]/g, (char) => String.fromCharCode(char.charCodeAt(0) + 0x60));
+}
+
+function getCityFromAddress(address) {
+  return String(address || '').match(/([^\s,、]+?[市区町村])/u)?.[1] || '';
+}
+
+function formatDistance(value) {
+  if (!Number.isFinite(value)) return '距離不明';
+  return value >= 1000 ? `約${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}km` : `約${Math.round(value)}m`;
+}
+
+async function selectFlyerPrediction(index) {
   const prediction = flyerSearchPredictions[index];
   if (!prediction || !placesService) return;
-  placesService.getDetails({ placeId: prediction.place_id, fields: ['name', 'formatted_address', 'geometry', 'place_id', 'formatted_phone_number', 'website'] }, (place, status) => {
-    if (status !== google.maps.places.PlacesServiceStatus.OK || !place?.geometry?.location) { showToast('候補の詳細を取得できませんでした'); return; }
-    setSelectedFlyerPlace({ name: place.name || prediction.structured_formatting?.main_text || '', address: place.formatted_address || prediction.description || '', lat: place.geometry.location.lat(), lng: place.geometry.location.lng(), placeId: place.place_id, phone: place.formatted_phone_number || '', website: place.website || '' });
+  const place = prediction.lat && prediction.lng && prediction.name && prediction.address
+    ? prediction
+    : await getFlyerPlaceDetails(prediction.placeId);
+  const position = prediction.lat && prediction.lng ? { lat: prediction.lat, lng: prediction.lng } : normalizePlacePosition(place);
+  if (!position) { showToast('候補の詳細を取得できませんでした'); return; }
+  setSelectedFlyerPlace({
+    name: place?.name || prediction.name || '',
+    address: place?.formatted_address || prediction.address || '',
+    lat: position.lat,
+    lng: position.lng,
+    placeId: place?.place_id || prediction.placeId || '',
+    phone: place?.formatted_phone_number || '',
+    website: place?.website || '',
   });
 }
 

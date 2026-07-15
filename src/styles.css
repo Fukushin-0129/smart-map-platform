@@ -344,6 +344,8 @@ body { background: #edf3ef; }
 .flyer-place-candidate { display: grid; gap: 0.25rem; width: 100%; min-height: 68px; padding: 0.85rem; border: 1px solid #d9f4df; border-radius: 16px; background: #fbfffc; box-shadow: none; text-align: left; color: #17301f; }
 .flyer-place-candidate span { color: #4d6554; font-weight: 600; }
 .flyer-place-candidate small { color: #166534; font-weight: 900; }
+.flyer-search-help { display: grid; gap: 0.4rem; }
+.flyer-search-help button { width: 100%; }
 .duplicate-warning { display: grid; gap: 0.5rem; padding: 0.8rem; border: 1px solid #facc15; border-radius: 16px; background: #fefce8; color: #713f12; }
 .duplicate-warning button { border-radius: 12px; background: #fff7ed; color: #713f12; text-align: left; }
 .duplicate-override { display: flex; grid-template-columns: auto 1fr; align-items: center; gap: 0.5rem; }
