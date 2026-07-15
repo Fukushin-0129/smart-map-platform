@@ -731,7 +731,10 @@ function bindFlyerRegistrationPanel() {
   });
   searchInput?.addEventListener('input', (event) => {
     flyerSearchQuery = event.target.value;
-    if (!flyerSearchInputComposing) searchFlyerPlacePredictions();
+    if (!flyerSearchInputComposing && !event.isComposing) searchFlyerPlacePredictions();
+  });
+  searchInput?.addEventListener('keydown', (event) => {
+    if (flyerSearchInputComposing || event.isComposing || event.keyCode === 229) return;
   });
   root.querySelectorAll('[data-select-flyer-prediction]').forEach((button) => button.addEventListener('click', () => selectFlyerPrediction(Number(button.dataset.selectFlyerPrediction))));
   root.querySelectorAll('[data-open-duplicate-flyer]').forEach((button) => button.addEventListener('click', () => { closeFlyerRegistrationPanel(); focusFlyer(button.dataset.openDuplicateFlyer); }));
