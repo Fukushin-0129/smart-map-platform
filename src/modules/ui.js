@@ -23,6 +23,7 @@ let flyerRegistrationMode = 'menu';
 let flyerSearchQuery = '';
 let flyerSearchPredictions = [];
 let flyerSearchRequestId = 0;
+let flyerSearchInputComposing = false;
 let selectedFlyerPlace = null;
 let flyerDuplicateCandidates = [];
 let allowDuplicateFlyerRegistration = false;
@@ -721,7 +722,17 @@ function bindFlyerRegistrationPanel() {
   root.querySelectorAll('[data-registration-mode]').forEach((button) => button.addEventListener('click', () => { flyerRegistrationMode = button.dataset.registrationMode; renderFlyerRegistrationPanel(); }));
   root.querySelectorAll('[data-registration-current]').forEach((button) => button.addEventListener('click', startCurrentLocationFlyerRegistration));
   root.querySelector('[data-retry-address-search]')?.addEventListener('click', () => root.querySelector('#flyerPlaceSearchInput')?.focus());
-  root.querySelector('#flyerPlaceSearchInput')?.addEventListener('input', (event) => { flyerSearchQuery = event.target.value; searchFlyerPlacePredictions(); });
+  const searchInput = root.querySelector('#flyerPlaceSearchInput');
+  searchInput?.addEventListener('compositionstart', () => { flyerSearchInputComposing = true; });
+  searchInput?.addEventListener('compositionend', (event) => {
+    flyerSearchInputComposing = false;
+    flyerSearchQuery = event.target.value;
+    searchFlyerPlacePredictions();
+  });
+  searchInput?.addEventListener('input', (event) => {
+    flyerSearchQuery = event.target.value;
+    if (!flyerSearchInputComposing) searchFlyerPlacePredictions();
+  });
   root.querySelectorAll('[data-select-flyer-prediction]').forEach((button) => button.addEventListener('click', () => selectFlyerPrediction(Number(button.dataset.selectFlyerPrediction))));
   root.querySelectorAll('[data-open-duplicate-flyer]').forEach((button) => button.addEventListener('click', () => { closeFlyerRegistrationPanel(); focusFlyer(button.dataset.openDuplicateFlyer); }));
   root.querySelector('[data-allow-duplicate]')?.addEventListener('change', (event) => { allowDuplicateFlyerRegistration = event.target.checked; });
