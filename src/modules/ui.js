@@ -90,6 +90,10 @@ app.innerHTML = `
               <span>${mode.label}</span>
             </label>`).join('')}
         </div>
+        <div class="display-mode-migration">
+          <div id="flyerSyncStatus" class="flyer-sync-status" aria-live="polite"></div>
+          <button type="button" id="migrateFlyersButton" class="flyer-sync-button" hidden>初回同期して共有データへ移行</button>
+        </div>
       </section>
 
       <nav class="drawer-menu" aria-label="管理機能">
@@ -205,8 +209,6 @@ app.innerHTML = `
             <h2>チラシ配布一覧</h2>
             <span id="flyerCount" class="badge">0件</span>
           </div>
-          <div id="flyerSyncStatus" class="flyer-sync-status" aria-live="polite"></div>
-          <button type="button" id="migrateFlyersButton" class="flyer-sync-button" hidden>初回同期して共有データへ移行</button>
           <div id="flyerStatusSummary" class="flyer-status-summary" aria-live="polite"></div>
           <div class="flyer-legend"><span class="blue">未配布</span><span class="green">配布済み</span><span class="red">配布不可</span><span class="yellow">不在</span></div>
           <button type="button" id="createTwoPersonRouteButton" class="primary flyer-route-button">2人でルート作成</button>
