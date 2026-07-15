@@ -17,6 +17,16 @@ let photoImports = loadPhotoImports();
 let currentPosition = null;
 let googleMapsPromise = null;
 let placesService = null;
+let autocompleteService = null;
+let geocoder = null;
+let flyerRegistrationMode = 'menu';
+let flyerSearchQuery = '';
+let flyerSearchPredictions = [];
+let flyerSearchRequestId = 0;
+let selectedFlyerPlace = null;
+let flyerDuplicateCandidates = [];
+let allowDuplicateFlyerRegistration = false;
+let tempFlyerMarker = null;
 let keywordPlaceCandidates = [];
 let photoPlaceCandidates = [];
 let flyerRoutes = [];
@@ -56,6 +66,10 @@ app.innerHTML = `
         <div class="fab-group">
           <button id="addFabButton" class="add-fab" type="button" aria-haspopup="true" aria-expanded="false">＋</button>
           <div id="addFabMenu" class="add-fab-menu" hidden>
+            <button type="button" data-open-flyer-registration>マンション名・住所から検索</button>
+            <button type="button" data-open-flyer-map-registration>地図上の位置から登録</button>
+            <button type="button" data-open-flyer-current-registration>現在地から登録</button>
+            <hr />
             <button type="button" data-open-panel="store">店舗を登録</button>
             <button type="button" data-locate-and-open="store">現在地から登録</button>
             <button type="button" data-open-panel="photo">写真GPSから登録</button>
@@ -67,6 +81,7 @@ app.innerHTML = `
       <p id="mapStatus" class="status map-status">Google Mapsを読み込み中です。</p>
       <div id="appToast" class="app-toast" role="status" aria-live="polite" hidden></div>
       <aside id="placeDetailPanel" class="place-detail-panel" aria-live="polite" hidden></aside>
+      <aside id="flyerRegistrationPanel" class="flyer-registration-panel" aria-live="polite" hidden></aside>
     </section>
 
     <div id="drawerBackdrop" class="drawer-backdrop" hidden></div>
@@ -284,6 +299,7 @@ const elements = {
   createTwoPersonRouteButton: document.querySelector('#createTwoPersonRouteButton'),
   flyerRouteList: document.querySelector('#flyerRouteList'),
   flyerDetailPanel: document.querySelector('#flyerDetailPanel'),
+  flyerRegistrationPanel: document.querySelector('#flyerRegistrationPanel'),
   placeDetailPanel: document.querySelector('#placeDetailPanel'),
   name: document.querySelector('#name'),
   categoryLayer: document.querySelector('#categoryLayer'),
@@ -420,7 +436,7 @@ function persistFlyerApartments(itemsToSync = flyerApartments) {
       flushFlyerSyncQueue();
     } else {
       queueFlyerSync(itemsToSync);
-      showToast(`Supabase保存に失敗しました。localStorageには保存済みです: ${result.reason}`);
+      showToast('端末には保存しました。共有データへの同期を再試行します');
     }
   });
 }
@@ -451,14 +467,16 @@ export async function initializeApp() {
     });
     infoWindow = new google.maps.InfoWindow();
     placesService = new google.maps.places.PlacesService(map);
-    map.addListener('click', (event) => fillCoordinates(event.latLng.lat(), event.latLng.lng()));
+    autocompleteService = new google.maps.places.AutocompleteService();
+    geocoder = new google.maps.Geocoder();
+    map.addListener('click', (event) => handleMapClick(event.latLng));
     renderMarkers();
     restoreMapViewOrFitVisibleData();
     map.addListener('idle', saveCurrentMapView);
     elements.mapSetup.hidden = true;
-    elements.mapStatus.textContent = 'Google Mapを表示しました。地図上をクリックすると、メニュー内の店舗登録フォームに緯度・経度を入力できます。';
+    elements.mapStatus.textContent = 'Google Mapを表示しました。＋からチラシ配布先を検索登録できます。';
   } catch (error) {
-    elements.mapStatus.textContent = error.message;
+    elements.mapStatus.textContent = `${error.message} 検索機能を利用できません。地図から位置を指定してください`;
     elements.mapStatus.classList.add('error');
     elements.mapSetup.hidden = false;
   }
@@ -524,6 +542,7 @@ function bindEvents() {
       closeManagementDrawer();
       closeAddMenu();
       closePlaceDetail();
+      closeFlyerRegistrationPanel();
     }
   });
   document.querySelectorAll('[data-open-panel]').forEach((button) => {
@@ -541,6 +560,9 @@ function bindEvents() {
   });
   elements.displayModeInputs.forEach((input) => input.addEventListener('change', () => setDisplayMode(input.value)));
   elements.addFabButton.addEventListener('click', () => toggleAddMenu());
+  document.querySelector('[data-open-flyer-registration]')?.addEventListener('click', () => openFlyerRegistrationPanel('search'));
+  document.querySelector('[data-open-flyer-map-registration]')?.addEventListener('click', () => openFlyerRegistrationPanel('map'));
+  document.querySelector('[data-open-flyer-current-registration]')?.addEventListener('click', startCurrentLocationFlyerRegistration);
   elements.locateButton.addEventListener('click', locateUser);
   elements.useCenterButton.addEventListener('click', () => {
     if (!map) return;
@@ -610,6 +632,251 @@ function bindEvents() {
 }
 
 
+
+function handleMapClick(latLng) {
+  fillCoordinates(latLng.lat(), latLng.lng());
+  if (flyerRegistrationMode === 'map') selectFlyerMapLocation(latLng);
+}
+
+function openFlyerRegistrationPanel(mode = 'menu') {
+  closeAddMenu();
+  closePlaceDetail();
+  flyerRegistrationMode = mode;
+  if (mode === 'search' && !autocompleteService) elements.mapStatus.textContent = '検索機能を利用できません。地図から位置を指定してください';
+  renderFlyerRegistrationPanel();
+  elements.flyerRegistrationPanel.hidden = false;
+  if (mode === 'search') setTimeout(() => elements.flyerRegistrationPanel.querySelector('#flyerPlaceSearchInput')?.focus(), 0);
+}
+
+function closeFlyerRegistrationPanel() {
+  if (!elements.flyerRegistrationPanel) return;
+  elements.flyerRegistrationPanel.hidden = true;
+  flyerRegistrationMode = 'menu';
+  flyerSearchPredictions = [];
+  selectedFlyerPlace = null;
+  flyerDuplicateCandidates = [];
+  allowDuplicateFlyerRegistration = false;
+  tempFlyerMarker?.setMap(null);
+  tempFlyerMarker = null;
+}
+
+function renderFlyerRegistrationPanel() {
+  const selected = selectedFlyerPlace;
+  elements.flyerRegistrationPanel.innerHTML = `
+    <div class="flyer-registration-header">
+      <div><p class="drawer-eyebrow">チラシ配布先登録</p><h2>${flyerRegistrationMode === 'map' ? '地図上の位置から登録' : '検索から新規登録'}</h2></div>
+      <button type="button" data-close-flyer-registration aria-label="登録パネルを閉じる">×</button>
+    </div>
+    <div class="flyer-registration-actions" ${flyerRegistrationMode !== 'menu' ? 'hidden' : ''}>
+      <button type="button" class="primary" data-registration-mode="search">マンション名・住所から検索</button>
+      <button type="button" data-registration-mode="map">地図上の位置から登録</button>
+      <button type="button" data-registration-current>現在地から登録</button>
+    </div>
+    <div class="flyer-registration-search" ${flyerRegistrationMode === 'search' ? '' : 'hidden'}>
+      <label>マンション名・住所を検索<input id="flyerPlaceSearchInput" value="${escapeHtml(flyerSearchQuery)}" placeholder="マンション名・住所を検索" autocomplete="off" /></label>
+      <p class="hint">例: ワコーレ / ワコーレ千里 / 吹田市山田東 ワコーレ / 大阪府吹田市○○町1-2-3</p>
+      <div id="flyerPlaceCandidateList" class="flyer-place-candidates">${renderFlyerPredictions()}</div>
+    </div>
+    <div class="flyer-registration-map" ${flyerRegistrationMode === 'map' ? '' : 'hidden'}>
+      <p class="hint">地図上をクリックして位置を指定してください。検索に出ないマンションは名前だけ入力して登録できます。</p>
+      <button type="button" data-registration-current>現在地を使用</button>
+    </div>
+    <div id="flyerSelectedPlaceArea">${selected ? renderFlyerSelectedPlace(selected) : ''}</div>`;
+  bindFlyerRegistrationPanel();
+}
+
+function renderFlyerPredictions() {
+  if (!autocompleteService) return '<p class="empty">検索機能を利用できません。地図から位置を指定してください</p>';
+  if (flyerSearchQuery.trim().length < 2) return '<p class="empty">2文字以上入力するとGoogle Place候補を表示します。</p>';
+  if (!flyerSearchPredictions.length) return `<div class="empty"><p>候補が見つかりません。</p><div class="button-row"><button type="button" data-retry-address-search>住所で再検索</button><button type="button" data-registration-mode="map">地図上をクリックして位置指定</button></div><button type="button" data-registration-current>現在地を使用</button></div>`;
+  return flyerSearchPredictions.map((prediction, index) => {
+    const mainText = prediction.structured_formatting?.main_text || prediction.description;
+    const secondaryText = prediction.structured_formatting?.secondary_text || prediction.description;
+    return `<button type="button" class="flyer-place-candidate" data-select-flyer-prediction="${index}">
+      <strong>${escapeHtml(mainText)}</strong>
+      <span>${escapeHtml(secondaryText)}</span>
+      <small>${escapeHtml(extractMunicipality(secondaryText))}${extractMunicipality(secondaryText) ? ' / ' : ''}Google Place候補</small>
+    </button>`;
+  }).join('');
+}
+
+function renderFlyerSelectedPlace(place) {
+  const assigneeOptions = ['', ...flyerAssignees].map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name || '担当者未設定')}</option>`).join('');
+  const duplicateHtml = flyerDuplicateCandidates.length ? `<div class="duplicate-warning"><strong>すでに登録されている可能性があります</strong>${flyerDuplicateCandidates.map((apt) => `<button type="button" data-open-duplicate-flyer="${escapeHtml(apt.id)}">既存地点を開く: ${escapeHtml(apt.name)} / ${escapeHtml(apt.address || '住所なし')}</button>`).join('')}<label class="duplicate-override"><input type="checkbox" data-allow-duplicate ${allowDuplicateFlyerRegistration ? 'checked' : ''}> 別地点として登録する</label></div>` : '';
+  return `<form id="flyerRegistrationForm" class="flyer-registration-form">
+    <h3>登録内容の確認</h3>${duplicateHtml}
+    <label>マンション名<input name="name" required value="${escapeHtml(place.name || '')}" placeholder="マンション名" /></label>
+    <label>住所<input name="address" value="${escapeHtml(place.address || '')}" placeholder="住所" /></label>
+    <label>初期ステータス<select name="status">${FLYER_STATUSES.map((status) => `<option value="${escapeHtml(status)}" ${status === '未配布' ? 'selected' : ''}>${escapeHtml(status)}</option>`).join('')}</select></label>
+    <label>担当者<select name="assignee">${assigneeOptions}</select></label>
+    <label>メモ<textarea name="memo" rows="3"></textarea></label>
+    <details><summary>詳細（緯度・経度）</summary><p class="coords">${Number(place.lat).toFixed(6)}, ${Number(place.lng).toFixed(6)}${place.placeId ? ` / place_id: ${escapeHtml(place.placeId)}` : ''}</p></details>
+    <button type="submit" class="primary sticky-register-button">この場所を登録</button>
+  </form>`;
+}
+
+function bindFlyerRegistrationPanel() {
+  const root = elements.flyerRegistrationPanel;
+  root.querySelector('[data-close-flyer-registration]')?.addEventListener('click', closeFlyerRegistrationPanel);
+  root.querySelectorAll('[data-registration-mode]').forEach((button) => button.addEventListener('click', () => { flyerRegistrationMode = button.dataset.registrationMode; renderFlyerRegistrationPanel(); }));
+  root.querySelectorAll('[data-registration-current]').forEach((button) => button.addEventListener('click', startCurrentLocationFlyerRegistration));
+  root.querySelector('[data-retry-address-search]')?.addEventListener('click', () => root.querySelector('#flyerPlaceSearchInput')?.focus());
+  root.querySelector('#flyerPlaceSearchInput')?.addEventListener('input', (event) => { flyerSearchQuery = event.target.value; searchFlyerPlacePredictions(); });
+  root.querySelectorAll('[data-select-flyer-prediction]').forEach((button) => button.addEventListener('click', () => selectFlyerPrediction(Number(button.dataset.selectFlyerPrediction))));
+  root.querySelectorAll('[data-open-duplicate-flyer]').forEach((button) => button.addEventListener('click', () => { closeFlyerRegistrationPanel(); focusFlyer(button.dataset.openDuplicateFlyer); }));
+  root.querySelector('[data-allow-duplicate]')?.addEventListener('change', (event) => { allowDuplicateFlyerRegistration = event.target.checked; });
+  root.querySelector('#flyerRegistrationForm')?.addEventListener('submit', registerSelectedFlyerPlace);
+}
+
+let flyerSearchTimer;
+function searchFlyerPlacePredictions() {
+  clearTimeout(flyerSearchTimer);
+  const input = flyerSearchQuery.trim();
+  const requestId = ++flyerSearchRequestId;
+  if (!autocompleteService || input.length < 2) {
+    flyerSearchPredictions = [];
+    updateFlyerCandidateList();
+    return;
+  }
+  flyerSearchTimer = setTimeout(() => {
+    autocompleteService.getPlacePredictions({
+      input,
+      language: 'ja',
+      componentRestrictions: { country: 'jp' },
+      location: new google.maps.LatLng(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng),
+      radius: 20000,
+    }, (predictions, status) => {
+      if (requestId !== flyerSearchRequestId) return;
+      flyerSearchPredictions = status === google.maps.places.PlacesServiceStatus.OK ? (predictions || []) : [];
+      updateFlyerCandidateList();
+    });
+  }, 250);
+}
+
+function updateFlyerCandidateList() {
+  const list = elements.flyerRegistrationPanel.querySelector('#flyerPlaceCandidateList');
+  if (!list) return;
+  list.innerHTML = renderFlyerPredictions();
+  bindFlyerCandidateControls(list);
+}
+
+function bindFlyerCandidateControls(root) {
+  root.querySelectorAll('[data-registration-mode]').forEach((button) => button.addEventListener('click', () => { flyerRegistrationMode = button.dataset.registrationMode; renderFlyerRegistrationPanel(); }));
+  root.querySelectorAll('[data-registration-current]').forEach((button) => button.addEventListener('click', startCurrentLocationFlyerRegistration));
+  root.querySelector('[data-retry-address-search]')?.addEventListener('click', () => elements.flyerRegistrationPanel.querySelector('#flyerPlaceSearchInput')?.focus());
+  root.querySelectorAll('[data-select-flyer-prediction]').forEach((button) => button.addEventListener('click', () => selectFlyerPrediction(Number(button.dataset.selectFlyerPrediction))));
+}
+
+function selectFlyerPrediction(index) {
+  const prediction = flyerSearchPredictions[index];
+  if (!prediction || !placesService) return;
+  placesService.getDetails({ placeId: prediction.place_id, fields: ['name', 'formatted_address', 'geometry', 'place_id', 'formatted_phone_number', 'website'] }, (place, status) => {
+    if (status !== google.maps.places.PlacesServiceStatus.OK || !place?.geometry?.location) {
+      showToast('候補の詳細を取得できませんでした');
+      return;
+    }
+    setSelectedFlyerPlace({
+      name: place.name || prediction.structured_formatting?.main_text || '',
+      address: place.formatted_address || prediction.description || '',
+      lat: place.geometry.location.lat(),
+      lng: place.geometry.location.lng(),
+      placeId: place.place_id || prediction.place_id,
+      phone: place.formatted_phone_number || '',
+      website: place.website || '',
+    });
+  });
+}
+
+function setSelectedFlyerPlace(place) {
+  selectedFlyerPlace = place;
+  allowDuplicateFlyerRegistration = false;
+  flyerDuplicateCandidates = findFlyerDuplicates(place);
+  if (map) {
+    map.panTo({ lat: place.lat, lng: place.lng });
+    map.setZoom(Math.max(map.getZoom() || 16, 17));
+  }
+  if (window.google?.maps) {
+    tempFlyerMarker?.setMap(null);
+    tempFlyerMarker = new google.maps.Marker({ position: { lat: place.lat, lng: place.lng }, map, title: '登録予定地点', opacity: 0.78 });
+  }
+  renderFlyerRegistrationPanel();
+}
+
+function selectFlyerMapLocation(latLng) {
+  const base = { name: '', address: '', lat: latLng.lat(), lng: latLng.lng(), placeId: '' };
+  if (!geocoder) return setSelectedFlyerPlace(base);
+  geocoder.geocode({ location: { lat: base.lat, lng: base.lng }, language: 'ja' }, (results, status) => setSelectedFlyerPlace({ ...base, address: status === 'OK' ? (results?.[0]?.formatted_address || '') : '' }));
+}
+
+function startCurrentLocationFlyerRegistration() {
+  closeAddMenu();
+  flyerRegistrationMode = 'map';
+  openFlyerRegistrationPanel('map');
+  if (!navigator.geolocation) {
+    showToast('このブラウザは現在地取得に対応していません');
+    return;
+  }
+  navigator.geolocation.getCurrentPosition((position) => {
+    if (!window.google?.maps) {
+      showToast('検索機能を利用できません。地図から位置を指定してください');
+      return;
+    }
+    selectFlyerMapLocation(new google.maps.LatLng(position.coords.latitude, position.coords.longitude));
+  }, () => showToast('現在地を取得できませんでした'), { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
+}
+
+function findFlyerDuplicates(place) {
+  const nameKey = normalizeDuplicateText(place.name);
+  const addressKey = normalizeDuplicateText(place.address);
+  return flyerApartments.filter((apt) => {
+    if (place.placeId && apt.placeId === place.placeId) return true;
+    if (isValidCoordinate(apt.lat, apt.lng) && distanceMeters(place.lat, place.lng, apt.lat, apt.lng) <= 30) return true;
+    const aptName = normalizeDuplicateText(apt.name);
+    const aptAddress = normalizeDuplicateText(apt.address);
+    return nameKey && addressKey && aptName && aptAddress && (aptName === nameKey || aptName.includes(nameKey) || nameKey.includes(aptName)) && (aptAddress === addressKey || aptAddress.includes(addressKey) || addressKey.includes(aptAddress));
+  });
+}
+
+function normalizeDuplicateText(value) { return String(value || '').toLowerCase().replace(/[\s　、，,\.\-ー−]/g, ''); }
+
+function extractMunicipality(address) {
+  return String(address || '').match(/([^\s,、]+[市区町村])/u)?.[1] || '';
+}
+
+function registerSelectedFlyerPlace(event) {
+  event.preventDefault();
+  if (!selectedFlyerPlace) return;
+  if (flyerDuplicateCandidates.length && !allowDuplicateFlyerRegistration) {
+    showToast('重複候補を確認してください');
+    renderFlyerRegistrationPanel();
+    return;
+  }
+  const data = new FormData(event.currentTarget);
+  const now = new Date().toISOString();
+  const apt = {
+    id: crypto.randomUUID(),
+    layerId: FLYER_LAYER.id,
+    layerName: FLYER_LAYER.name,
+    name: data.get('name').trim(),
+    address: data.get('address').trim(),
+    lat: Number(selectedFlyerPlace.lat),
+    lng: Number(selectedFlyerPlace.lng),
+    status: data.get('status') || '未配布',
+    assignee: data.get('assignee') || '',
+    memo: data.get('memo').trim(),
+    placeId: selectedFlyerPlace.placeId || '',
+    createdAt: now,
+    updatedAt: now,
+    photos: [],
+  };
+  flyerApartments = [apt, ...flyerApartments];
+  persistFlyerApartments([apt]);
+  renderFlyerList();
+  renderMarkers();
+  closeFlyerRegistrationPanel();
+  focusFlyer(apt.id);
+  showToast('チラシ配布先を登録しました');
+}
 
 async function importPhotoFiles(event) {
   const files = Array.from(event.target.files || []);
