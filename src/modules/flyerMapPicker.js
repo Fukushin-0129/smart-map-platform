@@ -2,6 +2,19 @@ const PANEL_ID = 'flyerMapCandidatePanel';
 const STYLE_ID = 'flyerMapCandidateStyles';
 let suppressNextMapSearch = false;
 
+const RESIDENTIAL_WORDS = [
+  'マンション', 'アパート', 'ハイツ', 'コーポ', 'メゾン', 'レジデンス',
+  'レジデンシャル', 'パレス', 'ヴィラ', 'ビラ', 'シャトー', 'グラン',
+  'シティ', 'ガーデン', 'ヒルズ', 'タワー', '団地', '住宅', '荘', '寮',
+];
+
+const EXCLUDED_WORDS = [
+  '住宅ローン', '融資', '銀行', '農協', '営業部', '営業所', '支店', '店舗',
+  '不動産', '管理会社', '管理センター', '工務店', '建設', '介護', '病院',
+  'クリニック', '学校', '幼稚園', '保育園', '寺', '神社', '公園', '駐車場',
+  'レストラン', 'カフェ', 'コンビニ', 'スーパー', 'ホテル', '会社', '株式会社',
+];
+
 export function initializeFlyerMapPicker() {
   injectStyles();
   ensureLauncherButton();
@@ -74,37 +87,73 @@ function loadPlaceById(map, placeId, fallbackLatLng) {
   renderLoading('建物情報を取得しています…');
   service.getDetails({
     placeId,
-    fields: ['name', 'formatted_address', 'geometry', 'place_id'],
+    fields: ['name', 'formatted_address', 'geometry', 'place_id', 'types'],
     language: 'ja',
   }, (place, status) => {
     if (status !== google.maps.places.PlacesServiceStatus.OK || !place) {
       searchNearbyBuildings(map, fallbackLatLng);
       return;
     }
-    renderCandidates(map, [normalizePlace(place)], fallbackLatLng);
+
+    const normalized = normalizePlace(place);
+    if (isExcludedCandidate(normalized)) {
+      searchNearbyBuildings(map, fallbackLatLng);
+      return;
+    }
+    renderCandidates(map, [normalized], fallbackLatLng);
   });
 }
 
 function searchNearbyBuildings(map, latLng) {
   if (!latLng) return;
-  const service = new google.maps.places.PlacesService(map);
   renderLoading('この付近のマンション・建物を探しています…');
 
+  const geocoder = new google.maps.Geocoder();
   const location = { lat: latLng.lat(), lng: latLng.lng() };
-  const queries = ['マンション', 'アパート', '住宅'];
+  geocoder.geocode({ location, language: 'ja', region: 'JP' }, (geocodeResults) => {
+    const areaWords = extractAreaWords(geocodeResults || []);
+    runResidentialSearches(map, location, latLng, areaWords);
+  });
+}
+
+function runResidentialSearches(map, location, clickedLatLng, areaWords) {
+  const service = new google.maps.places.PlacesService(map);
+  const localPrefix = areaWords.join(' ');
+  const queries = [
+    localPrefix && `${localPrefix} マンション`,
+    localPrefix && `${localPrefix} アパート`,
+    localPrefix && `${localPrefix} ハイツ`,
+    localPrefix && `${localPrefix} コーポ`,
+    localPrefix && `${localPrefix} レジデンス`,
+    'マンション',
+    'アパート',
+  ].filter(Boolean);
+
   let remaining = queries.length;
   const collected = [];
 
   queries.forEach((query) => {
-    service.textSearch({ query, location, radius: 120, language: 'ja' }, (results, status) => {
-      if (status === google.maps.places.PlacesServiceStatus.OK && results) collected.push(...results);
+    service.textSearch({ query, location, radius: 350, language: 'ja', region: 'JP' }, (results, status) => {
+      if (status === google.maps.places.PlacesServiceStatus.OK && results) {
+        collected.push(...results);
+      }
       remaining -= 1;
       if (remaining === 0) {
         const candidates = uniqueNearbyPlaces(collected, location).slice(0, 8);
-        renderCandidates(map, candidates, latLng);
+        renderCandidates(map, candidates, clickedLatLng);
       }
     });
   });
+}
+
+function extractAreaWords(results) {
+  const components = results[0]?.address_components || [];
+  const wantedTypes = new Set(['locality', 'sublocality_level_1', 'sublocality_level_2', 'sublocality_level_3']);
+  const words = components
+    .filter((component) => component.types?.some((type) => wantedTypes.has(type)))
+    .map((component) => component.long_name)
+    .filter(Boolean);
+  return [...new Set(words)].slice(-3);
 }
 
 function uniqueNearbyPlaces(results, origin) {
@@ -113,12 +162,26 @@ function uniqueNearbyPlaces(results, origin) {
     .filter((place) => place.geometry?.location && place.name)
     .map(normalizePlace)
     .filter((place) => {
+      if (isExcludedCandidate(place)) return false;
       const key = place.placeId || `${place.name}:${place.address}`;
       if (seen.has(key)) return false;
       seen.add(key);
-      return distanceMeters(origin, place) <= 250;
+      return distanceMeters(origin, place) <= 450;
     })
-    .sort((a, b) => distanceMeters(origin, a) - distanceMeters(origin, b));
+    .sort((a, b) => candidateScore(b, origin) - candidateScore(a, origin));
+}
+
+function isExcludedCandidate(place) {
+  const text = `${place.name} ${place.address}`;
+  return EXCLUDED_WORDS.some((word) => text.includes(word));
+}
+
+function candidateScore(place, origin) {
+  const text = `${place.name} ${place.address}`;
+  const residentialHits = RESIDENTIAL_WORDS.filter((word) => text.includes(word)).length;
+  const distance = distanceMeters(origin, place);
+  const typeBonus = (place.types || []).some((type) => ['premise', 'subpremise', 'lodging'].includes(type)) ? 30 : 0;
+  return residentialHits * 100 + typeBonus - distance / 5;
 }
 
 function normalizePlace(place) {
@@ -127,6 +190,7 @@ function normalizePlace(place) {
     name: place.name || '',
     address: place.formatted_address || place.vicinity || '',
     placeId: place.place_id || '',
+    types: place.types || [],
     lat: typeof location?.lat === 'function' ? location.lat() : Number(location?.lat),
     lng: typeof location?.lng === 'function' ? location.lng() : Number(location?.lng),
   };
@@ -147,7 +211,7 @@ function distanceMeters(a, b) {
 function renderCandidates(map, candidates, clickedLatLng) {
   if (!candidates.length) {
     renderPanel(`
-      <div class="flyer-map-candidate-header"><div><strong>候補が見つかりませんでした</strong><small>クリック地点をそのまま登録できます。</small></div><button type="button" data-close-candidates>×</button></div>
+      <div class="flyer-map-candidate-header"><div><strong>マンション候補が見つかりませんでした</strong><small>Googleに建物名が登録されていない可能性があります。クリック地点をそのまま登録できます。</small></div><button type="button" data-close-candidates>×</button></div>
       <button type="button" class="flyer-map-use-clicked" data-use-clicked-location>この位置を名前なしで登録画面へ</button>
     `);
     bindClickedLocation(map, clickedLatLng);
@@ -156,7 +220,7 @@ function renderCandidates(map, candidates, clickedLatLng) {
 
   renderPanel(`
     <div class="flyer-map-candidate-header">
-      <div><strong>この付近の候補</strong><small>マンション名を選ぶと登録画面へセットします。</small></div>
+      <div><strong>この付近のマンション候補</strong><small>近い順・集合住宅らしい名称を優先しています。</small></div>
       <button type="button" data-close-candidates>×</button>
     </div>
     <div class="flyer-map-candidate-list">
