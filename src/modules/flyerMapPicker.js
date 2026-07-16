@@ -1,5 +1,6 @@
 const PANEL_ID = 'flyerMapCandidatePanel';
 const STYLE_ID = 'flyerMapCandidateStyles';
+let suppressNextMapSearch = false;
 
 export function initializeFlyerMapPicker() {
   injectStyles();
@@ -40,6 +41,11 @@ function attachToMap(map) {
   map.__flyerCandidatePickerAttached = true;
 
   map.addListener('click', (event) => {
+    if (suppressNextMapSearch) {
+      suppressNextMapSearch = false;
+      return;
+    }
+
     const registrationPanel = document.querySelector('#flyerRegistrationPanel');
     if (!registrationPanel || registrationPanel.hidden) return;
     if (!registrationPanel.querySelector('.flyer-registration-map:not([hidden])')) return;
@@ -172,6 +178,7 @@ function renderCandidates(map, candidates, clickedLatLng) {
 
 function selectCandidate(map, place) {
   const latLng = new google.maps.LatLng(place.lat, place.lng);
+  suppressNextMapSearch = true;
   google.maps.event.trigger(map, 'click', { latLng });
   map.panTo(latLng);
   map.setZoom(Math.max(map.getZoom() || 17, 18));
@@ -190,6 +197,7 @@ function selectCandidate(map, place) {
 
 function bindClickedLocation(map, latLng) {
   document.querySelector(`#${PANEL_ID} [data-use-clicked-location]`)?.addEventListener('click', () => {
+    suppressNextMapSearch = true;
     google.maps.event.trigger(map, 'click', { latLng });
     closePanel();
   });
