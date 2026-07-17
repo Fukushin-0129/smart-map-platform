@@ -48,7 +48,7 @@ async function deleteFlyerPlace(id, button) {
     window.location.reload();
   } catch (error) {
     console.error('チラシ配布先を削除できませんでした。', error);
-    window.alert(`削除できませんでした。通信状態を確認して、もう一度お試しください。\n\n${error.message || ''}`);
+    window.alert(`削除できませんでした。\n\n${error.message || ''}`);
     button.disabled = false;
     button.textContent = 'このデータを削除';
   }
@@ -62,13 +62,32 @@ async function deleteFromSupabase(id) {
         apikey: SUPABASE_ANON_KEY,
         Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
         'Content-Type': 'application/json',
-        Prefer: 'return=minimal',
+        Prefer: 'return=representation',
       },
     });
-    if (!response.ok) throw new Error(`Supabase削除エラー: ${response.status}`);
+
+    if (!response.ok) {
+      const detail = await safeReadError(response);
+      throw new Error(`Supabase削除エラー: ${response.status}${detail ? ` / ${detail}` : ''}`);
+    }
+
+    const deletedRows = await response.json();
+    if (!Array.isArray(deletedRows) || deletedRows.length === 0) {
+      throw new Error('Supabaseでは削除0件でした。flyer_placesテーブルのDELETE用RLSポリシーを確認してください。');
+    }
+
     return { ok: true, reason: '' };
   } catch (error) {
     return { ok: false, reason: error.message || 'Supabase削除失敗' };
+  }
+}
+
+async function safeReadError(response) {
+  try {
+    const body = await response.json();
+    return body?.message || body?.details || body?.hint || '';
+  } catch {
+    return '';
   }
 }
 
