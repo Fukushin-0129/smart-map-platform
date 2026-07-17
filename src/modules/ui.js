@@ -74,6 +74,7 @@ app.innerHTML = `
             <button type="button" data-locate-and-open="store">現在地から登録</button>
             <button type="button" data-open-panel="photo">写真GPSから登録</button>
             <button type="button" data-open-panel="csv">CSVインポート</button>
+            <button type="button" data-open-panel="csv-export">CSVエクスポート</button>
           </div>
         </div>
       </div>

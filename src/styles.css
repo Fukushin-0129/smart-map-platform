@@ -220,8 +220,8 @@ body { background: #edf3ef; }
 .drawer-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 1rem 0.8rem; border-bottom: 1px solid #edf6ef; }
 .drawer-eyebrow { margin: 0 0 0.25rem; color: #16a34a; font-size: 0.76rem; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
 .drawer-header h1 { margin: 0; font-size: 1.25rem; }
-.drawer-menu { display: flex; gap: 0.45rem; padding: 0.75rem 1rem; overflow-x: auto; border-bottom: 1px solid #edf6ef; }
-.drawer-menu button { flex: 0 0 auto; min-height: 44px; border-radius: 999px; padding: 0.65rem 0.9rem; background: #f4faf5; box-shadow: none; white-space: nowrap; }
+.drawer-menu { display: flex; flex-wrap: wrap; gap: 0.45rem; padding: 0.75rem 1rem; overflow: visible; border-bottom: 1px solid #edf6ef; }
+.drawer-menu button { flex: 1 1 calc(50% - 0.45rem); min-height: 44px; border-radius: 999px; padding: 0.65rem 0.9rem; background: #f4faf5; box-shadow: none; white-space: nowrap; }
 .drawer-menu button.active { background: #16a34a; color: #ffffff; }
 .drawer-content.panel { border: 0; border-radius: 0; box-shadow: none; background: #ffffff; }
 .drawer-content.controls { max-height: none; overflow: auto; padding: 1rem; }
@@ -243,6 +243,7 @@ body { background: #edf3ef; }
   .add-fab { width: 60px; height: 60px; }
   .management-drawer { width: min(100vw, 420px); }
   .drawer-menu { padding-inline: 0.8rem; }
+  .drawer-menu button { flex-basis: 100%; }
   .drawer-content.controls { padding: 0.85rem; }
 }
 
