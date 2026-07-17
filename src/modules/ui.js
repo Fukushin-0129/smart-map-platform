@@ -30,6 +30,8 @@ let tempFlyerMarker = null;
 let keywordPlaceCandidates = [];
 let photoPlaceCandidates = [];
 let flyerRoutes = [];
+let selectedFlyerId = null;
+let recentlyAddedFlyerId = null;
 
 const DISPLAY_MODES = [
   { id: 'all', label: 'すべて表示' },
@@ -60,6 +62,12 @@ app.innerHTML = `
       </div>
 
       <div id="searchResultsPanel" class="search-results-panel" hidden></div>
+      <aside class="flyer-map-legend" aria-label="チラシ配布マップ凡例">
+        <div><span class="legend-dot legend-current"></span>現在地</div>
+        <div><span class="legend-dot legend-delivered"></span>配布済み</div>
+        <div><span class="legend-dot legend-undelivered"></span>配布未</div>
+        <div><span class="legend-dot legend-unavailable">×</span>配布不可</div>
+      </aside>
 
       <div class="map-actions" aria-label="地図操作">
         <button id="locateButton" class="map-action-button" type="button">現在地</button>
@@ -807,9 +815,12 @@ function registerSelectedFlyerPlace(event) {
   flyerApartments = [apt, ...flyerApartments];
   persistFlyerApartments([apt]);
   renderFlyerList();
+  recentlyAddedFlyerId = apt.id;
+  selectedFlyerId = apt.id;
   renderMarkers();
   closeFlyerRegistrationPanel();
-  focusFlyer(apt.id);
+  openPlaceDetailRef = { type: 'flyer', id: apt.id };
+  openPlaceDetail(renderFlyerDetailCard(apt), apt.name);
   showToast('チラシ配布先を登録しました');
 }
 
@@ -1466,7 +1477,9 @@ function locateUser() {
           position: currentPosition,
           map,
           title: '現在地',
-          icon: { path: google.maps.SymbolPath.CIRCLE, scale: 9, fillColor: '#2563eb', fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 3 },
+          icon: currentLocationIcon(),
+          clickable: false,
+          zIndex: 1000,
         });
       }
       elements.mapStatus.textContent = '現在地を取得しました。緯度・経度を店舗登録に利用できます。';
@@ -1509,14 +1522,18 @@ function renderMarkers() {
       icon: markerIconForFlyer(apt),
       clickable: true,
       optimized: false,
+      zIndex: selectedFlyerId === apt.id ? 900 : 100,
+      animation: recentlyAddedFlyerId === apt.id ? google.maps.Animation.DROP : null,
     });
     marker.flyerId = apt.id;
     bindPlaceMarkerClick(marker, () => {
       const latestApartment = flyerApartments.find((item) => item.id === marker.flyerId) || apt;
       openFlyerInfo(latestApartment, marker);
     });
+    bindFlyerMarkerHover(marker, apt);
     return marker;
   });
+  recentlyAddedFlyerId = null;
 }
 
 function bindPlaceMarkerClick(marker, openDetail) {
@@ -1693,6 +1710,8 @@ function openPlaceDetail(content, title = 'Place詳細') {
 }
 
 function closePlaceDetail() {
+  selectedFlyerId = null;
+  renderMarkers();
   openPlaceDetailRef = null;
   elements.placeDetailPanel.hidden = true;
   elements.placeDetailPanel.classList.remove('expanded');
@@ -2283,12 +2302,47 @@ function todayString() {
   return new Date().toISOString().slice(0, 10);
 }
 async function addFlyerPhoto(id, file) { if (!file) return; const photo = { id: crypto.randomUUID(), name: file.name, dataUrl: await readFileAsDataUrl(file), importedAt: new Date().toISOString() }; flyerApartments = flyerApartments.map((apt) => apt.id === id ? { ...apt, photos: [photo, ...(apt.photos || [])] } : apt); persistFlyerApartments(); renderFlyerList(); renderMarkers(); }
-function markerIconForFlyer(apt) {
+function markerIconForFlyer(apt, options = {}) {
   const route = routeMetaForFlyer(apt.id);
   if (route) {
     return { url: numberedMarkerSvg(route.color, route.label), scaledSize: new google.maps.Size(34, 42), anchor: new google.maps.Point(17, 42), labelOrigin: new google.maps.Point(17, 16) };
   }
-  return { path: google.maps.SymbolPath.CIRCLE, scale: 9, fillColor: FLYER_STATUS_COLORS[apt.status] || FLYER_STATUS_COLORS['未配布'], fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 2 };
+  const selected = selectedFlyerId === apt.id;
+  return { url: flyerMarkerSvg(apt.status, { selected, hover: options.hover }), scaledSize: new google.maps.Size(options.hover ? 32 : 28, options.hover ? 32 : 28), anchor: new google.maps.Point(options.hover ? 16 : 14, options.hover ? 16 : 14) };
+}
+
+function bindFlyerMarkerHover(marker, apt) {
+  marker.addListener('mouseover', () => {
+    marker.setIcon(markerIconForFlyer(apt, { hover: true }));
+    marker.setZIndex(950);
+  });
+  marker.addListener('mouseout', () => {
+    marker.setIcon(markerIconForFlyer(apt));
+    marker.setZIndex(selectedFlyerId === apt.id ? 900 : 100);
+  });
+}
+
+function flyerMarkerSvg(status, { selected = false, hover = false } = {}) {
+  const size = hover ? 32 : 28;
+  const center = size / 2;
+  const radius = hover ? 10.5 : 9.5;
+  const palette = {
+    '配布済み': { fill: '#FFD400', stroke: '#ffffff' },
+    '未配布': { fill: '#ffffff', stroke: '#111827' },
+    '配布不可': { fill: '#FF3B30', stroke: '#ffffff' },
+    '不在': { fill: '#ffffff', stroke: '#111827' },
+  };
+  const color = palette[status] || palette['未配布'];
+  const ring = selected ? `<circle cx="${center}" cy="${center}" r="${center - 2}" fill="none" stroke="#1A73E8" stroke-width="3"/>` : '';
+  const cross = status === '配布不可' ? `<path d="M${center - 4} ${center - 4} L${center + 4} ${center + 4} M${center + 4} ${center - 4} L${center - 4} ${center + 4}" stroke="#fff" stroke-width="2.8" stroke-linecap="round"/>` : '';
+  const shadow = hover ? '.32' : '.22';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><filter id="s"><feDropShadow dx="0" dy="2" stdDeviation="2.2" flood-color="#0f172a" flood-opacity="${shadow}"/></filter>${ring}<circle cx="${center}" cy="${center}" r="${radius}" fill="${color.fill}" stroke="${color.stroke}" stroke-width="3" filter="url(#s)"/>${cross}</svg>`;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+function currentLocationIcon() {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="42" height="42" viewBox="0 0 42 42"><circle cx="21" cy="21" r="20" fill="#1A73E8" fill-opacity=".18"/><circle cx="21" cy="21" r="11" fill="#1A73E8" stroke="#fff" stroke-width="4"/><circle cx="21" cy="21" r="4" fill="#fff" fill-opacity=".35"/></svg>';
+  return { url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`, scaledSize: new google.maps.Size(42, 42), anchor: new google.maps.Point(21, 21) };
 }
 
 function numberedMarkerSvg(color, label) {
@@ -2296,7 +2350,9 @@ function numberedMarkerSvg(color, label) {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 function openFlyerInfo(apt, marker) {
+  selectedFlyerId = apt.id;
   openPlaceDetailRef = { type: 'flyer', id: apt.id };
+  renderMarkers();
   openPlaceDetail(renderFlyerDetailCard(apt), apt.name);
   if (marker?.getPosition && map) map.panTo(marker.getPosition());
 }
@@ -2367,4 +2423,4 @@ function csvCell(value) {
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
-function focusFlyer(id) { const apt = flyerApartments.find((item) => item.id === id); if (!apt || !map) return; map.setCenter({ lat: apt.lat, lng: apt.lng }); map.setZoom(16); const marker = flyerMarkers.find((item) => item.flyerId === id); if (marker) openFlyerInfo(apt, marker); }
+function focusFlyer(id) { const apt = flyerApartments.find((item) => item.id === id); if (!apt || !map) return; map.setCenter({ lat: apt.lat, lng: apt.lng }); map.setZoom(Math.max(map.getZoom() || 16, 16)); const marker = flyerMarkers.find((item) => item.flyerId === id); if (marker) openFlyerInfo(apt, marker); }
