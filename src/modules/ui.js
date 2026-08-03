@@ -3,7 +3,7 @@ import { hasMigratedFlyerPlaces, loadDisplayMode, loadFlyerApartments, loadFlyer
 import { distanceMeters, escapeHtml, isValidCoordinate, readFileAsDataUrl } from './utils.js';
 import { isSupabaseConfigured, loadFlyerPlacesFromSupabase, saveFlyerPlacesToSupabase } from './supabaseFlyers.js';
 import { readPhotoGps } from './gpsImport.js';
-import { collectStoreMedia, createMediaItem, findDuplicateMedia } from './mediaManager.js';
+import { addMedia, collectStoreMedia, createMediaItem, findDuplicateMedia, moveMedia, removeMedia, setMainMedia, updateMedia } from './mediaManager.js';
 
 let map;
 let userMarker;
@@ -1174,7 +1174,7 @@ function createPhotoSpot(photo, categoryLayerValue = '') {
 }
 
 function addPhotoToStore(storeList, storeId, photo) {
-  return storeList.map((store) => store.id === storeId ? { ...store, photos: [photo, ...(store.photos || [])] } : store);
+  return storeList.map((store) => store.id === storeId ? { ...store, photos: addMedia(store.photos || [], photo) } : store);
 }
 
 function findNearestStore(lat, lng) {
@@ -1631,6 +1631,7 @@ function openPlaceDetail(content, title = 'Place詳細') {
   elements.placeDetailPanel.hidden = false;
   elements.placeDetailPanel.querySelector('[data-close-place-detail]')?.addEventListener('click', closePlaceDetail);
   bindFlyerDetailControls(elements.placeDetailPanel);
+  bindStorePhotoManager(elements.placeDetailPanel);
   elements.placeDetailPanel.querySelector('[data-place-sheet-handle]')?.addEventListener('click', () => {
     elements.placeDetailPanel.classList.toggle('expanded');
   });
@@ -1661,7 +1662,7 @@ function renderStoreDetailCard(store) {
     typeLabel: displayCategoryLayer(store),
     title: store.name || '名称未設定',
     summary: store.address || store.description || displayCategoryLayer(store),
-    body: `${rows}${renderDetailPhotos(store.photos)}`,
+    body: `${rows}${renderStorePhotoManager(store)}`,
   });
 }
 
@@ -1726,8 +1727,58 @@ function renderDetailRows(rows) {
   return html ? `<dl class="place-detail-list">${html}</dl>` : '<p class="empty">表示できる詳細情報がありません。</p>';
 }
 
-function renderDetailPhotos(photos = []) {
-  return photos.length ? `<div class="place-detail-photos">${photos.slice(0, 6).map((photo) => `<img src="${escapeHtml(photo.dataUrl)}" alt="${escapeHtml(photo.name || '写真')}" />`).join('')}</div>` : '';
+function renderStorePhotoManager(store) {
+  const photos = store.photos || [];
+  if (!photos.length) return '<section class="media-manager"><h3>写真</h3><p class="empty">登録済みの写真はありません。</p></section>';
+  return `<section class="media-manager" data-media-manager-store="${escapeHtml(store.id)}">
+    <h3>写真</h3>
+    <div class="media-manager-list">${photos.map((photo, index) => `
+      <article class="media-manager-item" data-media-id="${escapeHtml(photo.id)}">
+        <img src="${escapeHtml(photo.dataUrl)}" alt="${escapeHtml(photo.name || '写真')}" />
+        <div>
+          <strong>${photo.isMain ? 'メイン画像' : `写真 ${index + 1}`}</strong>
+          <label>キャプション<input value="${escapeHtml(photo.caption || '')}" data-media-caption /></label>
+          <small>${escapeHtml(formatDateTime(photo.importedAt))}</small>
+        </div>
+        <div class="media-manager-actions">
+          <button type="button" data-move-media="-1" ${index === 0 ? 'disabled' : ''}>前へ</button>
+          <button type="button" data-move-media="1" ${index === photos.length - 1 ? 'disabled' : ''}>次へ</button>
+          <button type="button" data-set-main-media ${photo.isMain ? 'disabled' : ''}>メインに設定</button>
+          <button type="button" class="danger" data-delete-media>削除</button>
+        </div>
+      </article>`).join('')}</div>
+  </section>`;
+}
+
+function bindStorePhotoManager(root) {
+  const manager = root.querySelector('[data-media-manager-store]');
+  if (!manager) return;
+  const storeId = manager.dataset.mediaManagerStore;
+  manager.querySelectorAll('[data-media-id]').forEach((item) => {
+    const mediaId = item.dataset.mediaId;
+    item.querySelector('[data-media-caption]')?.addEventListener('change', (event) => {
+      updateStorePhotos(storeId, (photos) => updateMedia(photos, mediaId, { caption: event.target.value.trim() }));
+    });
+    item.querySelectorAll('[data-move-media]').forEach((button) => button.addEventListener('click', () => {
+      updateStorePhotos(storeId, (photos) => moveMedia(photos, mediaId, Number(button.dataset.moveMedia)));
+    }));
+    item.querySelector('[data-set-main-media]')?.addEventListener('click', () => {
+      updateStorePhotos(storeId, (photos) => setMainMedia(photos, mediaId));
+    });
+    item.querySelector('[data-delete-media]')?.addEventListener('click', () => {
+      if (!window.confirm('本当にこの写真を削除しますか？')) return;
+      updateStorePhotos(storeId, (photos) => removeMedia(photos, mediaId));
+    });
+  });
+}
+
+function updateStorePhotos(storeId, updater) {
+  stores = stores.map((store) => store.id === storeId ? { ...store, photos: updater(store.photos || []) } : store);
+  saveStores(stores);
+  renderStoreList();
+  renderMarkers();
+  const store = stores.find((item) => item.id === storeId);
+  if (store) openPlaceDetail(renderStoreDetailCard(store), store.name);
 }
 
 function hasDetailValue(value) {
