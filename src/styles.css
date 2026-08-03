@@ -276,6 +276,15 @@ body { background: #edf3ef; }
 .place-detail-row dd { margin: 0; color: #17301f; line-height: 1.5; overflow-wrap: anywhere; }
 .place-detail-photos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.45rem; margin-top: 1rem; }
 .place-detail-photos img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 14px; background: #eefdf2; }
+.media-manager { margin-top: 1rem; }
+.media-manager h3 { margin: 0 0 0.65rem; }
+.media-manager-list { display: grid; gap: 0.75rem; }
+.media-manager-item { display: grid; grid-template-columns: 84px 1fr; gap: 0.65rem; padding: 0.7rem; border: 1px solid #d9f4df; border-radius: 14px; background: #fbfffc; }
+.media-manager-item img { width: 84px; height: 84px; object-fit: cover; border-radius: 10px; }
+.media-manager-item label, .media-manager-item small { display: block; margin-top: 0.35rem; }
+.media-manager-item input { width: 100%; }
+.media-manager-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.media-manager-actions button { flex: 1 1 auto; }
 .place-detail-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.55rem; margin-top: 1rem; }
 .place-detail-actions button { min-height: 44px; border-radius: 14px; padding: 0.65rem 0.55rem; box-shadow: none; }
 .place-sheet-handle { display: none; }
