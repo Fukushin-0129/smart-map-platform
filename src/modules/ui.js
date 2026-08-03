@@ -2,6 +2,7 @@ import { CANDIDATE_STORE_METERS, DEFAULT_ASSIGNEES, DEFAULT_CENTER, DEFAULT_ZOOM
 import { hasMigratedFlyerPlaces, loadDisplayMode, loadFlyerApartments, loadFlyerAssignees, loadFlyerSyncQueue, loadLayers, loadLayerVisibility, loadMapView, loadPhotoImports, loadStores, markFlyerPlacesMigrated, saveDisplayMode, saveFlyerApartments, saveFlyerAssignees, saveFlyerSyncQueue, saveLayers, saveLayerVisibility, saveMapView, savePhotoImports, saveStores } from './storage.js';
 import { distanceMeters, escapeHtml, isValidCoordinate, readFileAsDataUrl } from './utils.js';
 import { isSupabaseConfigured, loadFlyerPlacesFromSupabase, saveFlyerPlacesToSupabase } from './supabaseFlyers.js';
+import { readPhotoGps } from './gpsImport.js';
 
 let map;
 let userMarker;
@@ -163,9 +164,9 @@ app.innerHTML = `
           <h2>写真GPSでカフェ登録</h2>
           <div class="photo-import">
             <label>写真（複数選択可）
-              <input id="photoInput" type="file" accept="image/*,.jpg,.jpeg" multiple />
+              <input id="photoInput" type="file" accept="image/*,.jpg,.jpeg,.heic,.heif,image/heic,image/heif" multiple />
             </label>
-            <p class="hint">JPEG写真のExif GPSから位置を読み取り、近くのカフェ・飲食店候補を検索します。候補を選ぶと写真付きで店舗データに登録します。GPS情報がない写真は未分類に保存します。</p>
+            <p class="hint">JPEG・HEIC写真のExif GPSから位置を読み取り、地図を移動して近くの候補を検索します。GPS情報がない場合はお知らせします。</p>
             <p id="photoStatus" class="import-status" aria-live="polite"></p>
             <div id="photoReview" class="photo-review"></div>
           </div>
@@ -825,6 +826,7 @@ function registerSelectedFlyerPlace(event) {
 }
 
 async function importPhotoFiles(event) {
+  console.info('[写真GPS] changeイベント発火');
   const files = Array.from(event.target.files || []);
   if (!files.length) return;
 
@@ -855,14 +857,17 @@ async function importPhotoFiles(event) {
 
 async function importSinglePhoto(file, stats) {
   try {
+    console.info('[写真GPS] FileReader開始', { fileName: file.name, fileType: file.type, fileSize: file.size });
     const dataUrl = await readFileAsDataUrl(file);
+    console.info('[写真GPS] 画像読込成功', { fileName: file.name });
     let gps = null;
 
     try {
-      gps = await readExifGps(file);
+      console.info('[写真GPS] EXIF解析開始', { fileName: file.name });
+      gps = await readPhotoGps(file);
     } catch (error) {
-      if (error instanceof PhotoImportError) throw error;
-      console.error('Exif GPSの読み取りに失敗しました。GPSなしとして扱います。', { fileName: file.name, fileType: file.type, error });
+      console.error('[写真GPS] 例外内容', { fileName: file.name, fileType: file.type, error });
+      throw error;
     }
 
     const photo = {
@@ -875,11 +880,17 @@ async function importSinglePhoto(file, stats) {
     };
 
     if (!gps) {
+      console.info('[写真GPS] GPS取得失敗', { fileName: file.name });
       photoImports.unclassified = [photo, ...photoImports.unclassified];
       stats.unclassified += 1;
-      return `${file.name}: GPS情報がありません。未分類に保存しました。`;
+      return `${file.name}: この写真には位置情報がありません`;
     }
 
+    console.info('[写真GPS] GPS取得成功', { fileName: file.name, lat: gps.lat, lng: gps.lng });
+    map?.panTo({ lat: gps.lat, lng: gps.lng });
+    map?.setZoom(Math.max(map.getZoom() || DEFAULT_ZOOM, 17));
+
+    console.info('[写真GPS] 周辺検索開始', { fileName: file.name, lat: gps.lat, lng: gps.lng });
     const nearest = findNearestStore(gps.lat, gps.lng);
     if (nearest && nearest.distance <= NEAR_STORE_METERS) {
       stores = addPhotoToStore(stores, nearest.store.id, photo);
@@ -900,7 +911,7 @@ async function importSinglePhoto(file, stats) {
     return `${file.name}: GPS付近の候補を表示しました。`;
   } catch (error) {
     const message = error instanceof Error ? error.message : '写真の読み込み中に不明なエラーが発生しました。';
-    console.error('写真インポートに失敗しました。', { fileName: file.name, fileType: file.type, fileSize: file.size, error });
+    console.error('[写真GPS] 例外内容', { fileName: file.name, fileType: file.type, fileSize: file.size, error });
     stats.errors.push(`${file.name}: ${message}`);
     return `${file.name}: エラー - ${message}`;
   }
@@ -1141,8 +1152,6 @@ function categoryFromPlace(place) {
   return types[0]?.replace(/_/g, ' ') || '未分類';
 }
 
-class PhotoImportError extends Error {}
-
 function createPhotoSpot(photo, categoryLayerValue = '') {
   return {
     id: crypto.randomUUID(),
@@ -1214,95 +1223,6 @@ function resolveCandidatePhoto(photoId, action) {
   renderMarkers();
 }
 
-async function readExifGps(file) {
-  const buffer = await file.arrayBuffer();
-  const view = new DataView(buffer);
-  if (view.byteLength < 2 || view.getUint16(0) !== 0xffd8) throw new PhotoImportError('JPEG形式ではありません。');
-
-  let offset = 2;
-  while (offset + 4 <= view.byteLength) {
-    const marker = view.getUint16(offset);
-    offset += 2;
-    if (offset + 2 > view.byteLength) break;
-    const length = view.getUint16(offset);
-    offset += 2;
-    if (length < 2 || offset + length - 2 > view.byteLength) break;
-    if (marker === 0xffe1 && length >= 8 && getAscii(view, offset, 6) === 'Exif\0\0') {
-      return parseTiffGps(view, offset + 6);
-    }
-    offset += length - 2;
-  }
-  return null;
-}
-
-function parseTiffGps(view, tiffOffset) {
-  if (tiffOffset + 8 > view.byteLength) return null;
-  const byteOrder = getAscii(view, tiffOffset, 2);
-  if (!['II', 'MM'].includes(byteOrder)) return null;
-  const littleEndian = byteOrder === 'II';
-  const firstIfdOffset = getUint32(view, tiffOffset + 4, littleEndian);
-  if (tiffOffset + firstIfdOffset + 2 > view.byteLength) return null;
-  const gpsIfdPointer = findIfdValue(view, tiffOffset + firstIfdOffset, 0x8825, littleEndian, tiffOffset);
-  if (!gpsIfdPointer) return null;
-
-  const gpsIfd = tiffOffset + gpsIfdPointer;
-  if (gpsIfd + 2 > view.byteLength) return null;
-  const latRef = findIfdValue(view, gpsIfd, 0x0001, littleEndian, tiffOffset);
-  const latValue = findIfdValue(view, gpsIfd, 0x0002, littleEndian, tiffOffset);
-  const lngRef = findIfdValue(view, gpsIfd, 0x0003, littleEndian, tiffOffset);
-  const lngValue = findIfdValue(view, gpsIfd, 0x0004, littleEndian, tiffOffset);
-  if (!latRef || !latValue || !lngRef || !lngValue) return null;
-
-  const lat = convertGpsCoordinate(latValue, latRef);
-  const lng = convertGpsCoordinate(lngValue, lngRef);
-  return isValidCoordinate(lat, lng) ? { lat, lng } : null;
-}
-
-function findIfdValue(view, ifdOffset, tag, littleEndian, tiffOffset) {
-  if (ifdOffset + 2 > view.byteLength) return null;
-  const count = getUint16(view, ifdOffset, littleEndian);
-  for (let i = 0; i < count; i += 1) {
-    const entry = ifdOffset + 2 + i * 12;
-    if (entry + 12 > view.byteLength) return null;
-    if (getUint16(view, entry, littleEndian) !== tag) continue;
-    const type = getUint16(view, entry + 2, littleEndian);
-    const values = getUint32(view, entry + 4, littleEndian);
-    const valueOffset = values * typeByteSize(type) <= 4 ? entry + 8 : tiffOffset + getUint32(view, entry + 8, littleEndian);
-    if (valueOffset < 0 || valueOffset > view.byteLength) return null;
-    if (type === 2) return valueOffset + values <= view.byteLength ? getAscii(view, valueOffset, values).replace(/\0/g, '') : null;
-    if (type === 5) return Array.from({ length: values }, (_, index) => {
-      const rationalOffset = valueOffset + index * 8;
-      if (rationalOffset + 8 > view.byteLength) return 0;
-      const numerator = getUint32(view, rationalOffset, littleEndian);
-      const denominator = getUint32(view, rationalOffset + 4, littleEndian);
-      return denominator ? numerator / denominator : 0;
-    });
-    return getUint32(view, entry + 8, littleEndian);
-  }
-  return null;
-}
-
-function convertGpsCoordinate(parts, ref) {
-  if (!Array.isArray(parts) || parts.length < 3) return NaN;
-  const value = parts[0] + parts[1] / 60 + parts[2] / 3600;
-  return ['S', 'W'].includes(ref.toUpperCase()) ? -value : value;
-}
-
-function typeByteSize(type) {
-  return { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8 }[type] || 0;
-}
-
-function getUint16(view, offset, littleEndian) {
-  return view.getUint16(offset, littleEndian);
-}
-
-function getUint32(view, offset, littleEndian) {
-  return view.getUint32(offset, littleEndian);
-}
-
-function getAscii(view, offset, length) {
-  return Array.from({ length }, (_, index) => String.fromCharCode(view.getUint8(offset + index))).join('');
-}
 
 async function importKmlFiles(event) {
   const files = Array.from(event.target.files || []);
