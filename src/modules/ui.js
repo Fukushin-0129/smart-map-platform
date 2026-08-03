@@ -3,6 +3,7 @@ import { hasMigratedFlyerPlaces, loadDisplayMode, loadFlyerApartments, loadFlyer
 import { distanceMeters, escapeHtml, isValidCoordinate, readFileAsDataUrl } from './utils.js';
 import { isSupabaseConfigured, loadFlyerPlacesFromSupabase, saveFlyerPlacesToSupabase } from './supabaseFlyers.js';
 import { readPhotoGps } from './gpsImport.js';
+import { collectStoreMedia, createMediaItem, findDuplicateMedia } from './mediaManager.js';
 
 let map;
 let userMarker;
@@ -831,7 +832,7 @@ async function importPhotoFiles(event) {
   if (!files.length) return;
 
   elements.photoStatus.textContent = '写真を読み込んでいます...';
-  const stats = { attached: 0, candidates: 0, created: 0, unclassified: 0, errors: [] };
+  const stats = { attached: 0, candidates: 0, created: 0, unclassified: 0, duplicates: 0, errors: [] };
   const results = [];
   const previousCandidateIds = new Set(photoPlaceCandidates.map((group) => group.id));
 
@@ -870,20 +871,23 @@ async function importSinglePhoto(file, stats) {
       throw error;
     }
 
-    const photo = {
-      id: crypto.randomUUID(),
-      name: file.name,
+    const photo = await createMediaItem(file, {
       dataUrl,
-      importedAt: new Date().toISOString(),
       lat: gps?.lat ?? null,
       lng: gps?.lng ?? null,
-    };
+    });
+
+    const pendingMedia = photoPlaceCandidates.map((group) => group.photo);
+    const savedReviewMedia = [...photoImports.candidates.map((item) => item.photo), ...photoImports.unclassified];
+    if (findDuplicateMedia([...collectStoreMedia(stores), ...savedReviewMedia, ...pendingMedia], photo)) {
+      stats.duplicates += 1;
+      return `${file.name}: この写真は既に登録または確認待ちです。`;
+    }
 
     if (!gps) {
       console.info('[写真GPS] GPS取得失敗', { fileName: file.name });
-      photoImports.unclassified = [photo, ...photoImports.unclassified];
       stats.unclassified += 1;
-      return `${file.name}: この写真には位置情報がありません`;
+      return `${file.name}: この写真には位置情報がないため保存していません。`;
     }
 
     console.info('[写真GPS] GPS取得成功', { fileName: file.name, lat: gps.lat, lng: gps.lng });
@@ -892,11 +896,6 @@ async function importSinglePhoto(file, stats) {
 
     console.info('[写真GPS] 周辺検索開始', { fileName: file.name, lat: gps.lat, lng: gps.lng });
     const nearest = findNearestStore(gps.lat, gps.lng);
-    if (nearest && nearest.distance <= NEAR_STORE_METERS) {
-      stores = addPhotoToStore(stores, nearest.store.id, photo);
-      stats.attached += 1;
-      return `${file.name}: ${Math.round(nearest.distance)}m先の既存店舗「${nearest.store.name}」へ追加しました。`;
-    }
     const existingCandidates = findNearbyStores(gps.lat, gps.lng, CANDIDATE_STORE_METERS);
     const placeCandidates = nearest && nearest.distance > CANDIDATE_STORE_METERS ? [] : await searchNearbyFoodPlaces(gps.lat, gps.lng);
     if (!existingCandidates.length && (!nearest || nearest.distance > CANDIDATE_STORE_METERS)) stats.created += 1;
@@ -908,7 +907,7 @@ async function importSinglePhoto(file, stats) {
       placeCandidates,
     }, ...photoPlaceCandidates];
     stats.candidates += 1;
-    return `${file.name}: GPS付近の候補を表示しました。`;
+    return `${file.name}: 登録前の確認候補を表示しました。`;
   } catch (error) {
     const message = error instanceof Error ? error.message : '写真の読み込み中に不明なエラーが発生しました。';
     console.error('[写真GPS] 例外内容', { fileName: file.name, fileType: file.type, fileSize: file.size, error });
@@ -918,7 +917,7 @@ async function importSinglePhoto(file, stats) {
 }
 
 function formatPhotoImportStatus(stats, results) {
-  const summary = `${stats.attached}枚を既存店舗に追加、${stats.candidates}枚を候補表示、${stats.created}件を新規スポット、${stats.unclassified}枚を未分類にしました。`;
+  const summary = `${stats.candidates}枚を登録前確認に追加、${stats.duplicates}枚の重複を除外、${stats.unclassified}枚は位置情報がないため未保存です。`;
   const errorSummary = stats.errors.length ? `エラー: ${stats.errors.length}件。` : '';
   return [summary, errorSummary, ...results].filter(Boolean).join('\n');
 }
@@ -1038,9 +1037,11 @@ function renderPlaceCandidates() {
       ? `<article class="candidate-card"><div><p>近くのカフェ・飲食店候補が見つかりませんでした。</p>${renderCategoryLayerSelect(`fallback-layer-${escapeHtml(group.id)}`)}</div><button data-create-photo-spot="${group.id}">写真位置で新規登録</button></article>`
       : '';
     return `<section class="photo-place-group">
-      <h3>${escapeHtml(group.photo.name)} の候補</h3>
+      <h3>登録前確認: ${escapeHtml(group.photo.name)}</h3>
       <img src="${escapeHtml(group.photo.dataUrl)}" alt="${escapeHtml(group.photo.name)}" />
+      <p class="coords">GPS: ${Number(group.origin.lat).toFixed(6)}, ${Number(group.origin.lng).toFixed(6)}</p>
       ${existing}${places}${fallback}
+      <button type="button" data-cancel-photo-import="${group.id}">キャンセル・別の写真を選ぶ</button>
     </section>`;
   }).join('');
 
@@ -1053,6 +1054,13 @@ function renderPlaceCandidates() {
   });
   elements.placeCandidates.querySelectorAll('[data-create-photo-spot]').forEach((button) => {
     button.addEventListener('click', () => createPhotoFallbackSpot(button.dataset.createPhotoSpot, button.closest('.candidate-card')?.querySelector('select')?.value || ''));
+  });
+  elements.placeCandidates.querySelectorAll('[data-cancel-photo-import]').forEach((button) => {
+    button.addEventListener('click', () => {
+      photoPlaceCandidates = photoPlaceCandidates.filter((item) => item.id !== button.dataset.cancelPhotoImport);
+      renderPlaceCandidates();
+      elements.photoStatus.textContent = '写真の登録をキャンセルしました。';
+    });
   });
 }
 
