@@ -26,26 +26,38 @@ smart-map-platform/
 ├── package.json
 ├── server.mjs
 ├── vercel.json
+├── supabase/
+│   ├── flyer_places.sql
+│   └── migrations/
+│       └── 20260717_add_units_to_flyer_places.sql
 ├── scripts/
 │   ├── build.mjs
 │   └── init-config.mjs
+├── test/
+│   └── gpsImport.test.js
 └── src/
     ├── main.js
     ├── styles.css
     └── modules/
         ├── constants.js
-        ├── csvImport.js
-        ├── flyerManager.js
-        ├── gpsImport.js
-        ├── kmlImport.js
-        ├── mapManager.js
-        ├── saladMap.js
         ├── storage.js
-        ├── ui.js
-        └── utils.js
+        ├── utils.js
+        ├── ui.js                          # 約2,300行。地図/KML/CSV/写真GPS/Places検索/チラシ配布UIの大半を集約
+        ├── gpsImport.js                    # JPEG/HEIC Exif GPS抽出（唯一テストがある）
+        ├── supabaseFlyers.js               # チラシ配布データのSupabase読み込み・upsert
+        ├── flyerMapPicker.js               # チラシ配布の地図ピッカーUI
+        ├── flyerContinuousRegistration.js  # 登録後も地図ビューを維持したまま連続登録
+        ├── flyerDelete.js                  # チラシ配布先の削除（Supabase削除の検証込み）
+        ├── flyerSpreadsheetRoundTrip.js     # チラシ配布CSVの読み込み・書き出し
+        ├── mapCapture.js                    # 地図キャプチャ関連
+        ├── csvImport.js       # 空スタブ（将来の分割先として予約、未使用）
+        ├── flyerManager.js    # 空スタブ（同上）
+        ├── kmlImport.js       # 空スタブ（同上）
+        ├── mapManager.js      # 空スタブ（同上）
+        └── saladMap.js        # 空スタブ（同上）
 ```
 
-`csvImport.js`、`flyerManager.js`、`gpsImport.js`、`kmlImport.js`、`mapManager.js`、`saladMap.js` は、将来の分割先として予約された空モジュールです。実処理の大半は `src/modules/ui.js` に集約されています。
+`csvImport.js`、`flyerManager.js`、`kmlImport.js`、`mapManager.js`、`saladMap.js` は将来の分割先として予約された空モジュールで、中身は空のままです。一方 `gpsImport.js`、`supabaseFlyers.js`、`flyerMapPicker.js`、`flyerContinuousRegistration.js`、`flyerDelete.js`、`flyerSpreadsheetRoundTrip.js`、`mapCapture.js` はすでに実装され `main.js` から初期化されていますが、`ui.js` のグローバル状態・DOM構造に依存する形で外付けされており、Serviceレイヤーとしての分離はまだ完了していません。実処理の大半（地図初期化、KML/CSV/写真GPS/Places検索、チラシ配布のUIと状態管理の中核）は依然として `src/modules/ui.js`（約2,300行）に集約されています。
 
 ## 現在のデータ形式
 
@@ -124,6 +136,16 @@ KML レイヤーは次のような情報を持ちます。
 | `smart-map-platform:layer-visibility` | レイヤー表示状態 |
 | `smart-map-platform:photo-imports` | 写真取込の候補・未分類データ |
 | `smart-map-platform:flyer-assignees` | チラシ配布担当者リスト |
+| `smart-map-platform:flyer-sync-queue` | Supabase保存に失敗したチラシ配布データの同期待ちキュー |
+| `smart-map-platform:flyer-places-migrated` | localStorage→Supabaseへの移行完了フラグ |
+| `smart-map-platform:display-mode` | 表示モード（店舗/チラシ配布などの切替状態） |
+| `smart-map-platform:map-view` | 地図の中心・ズームなど直前の表示状態 |
+
+## Supabase連携（チラシ配布のみ）
+
+- `src/modules/supabaseFlyers.js` が `flyer_places` テーブルへの読み込み・upsertを担当し、`src/modules/flyerDelete.js` が削除を担当する。いずれもクライアントから匿名キー（anon key）でSupabase REST APIを直接呼び出す構成。
+- `supabase/flyer_places.sql` のRLSポリシーは `to anon using (true)` で、認証なしの匿名ユーザーが全行を読み書きできる。SQLコメント上も「開発検証用、本番前に必ず置き換えること」と明記されている。
+- アプリ側にSupabase Auth等の認証実装は無いため、RLSを認証必須へ締めると現在のSupabase書き込み・削除機能がそのまま失敗する（localStorageへはフォールバックするため画面は壊れないが、クラウド同期は止まる）。RLS強化は認証機構の新規実装とセットで計画する必要がある。
 
 ## KML 処理
 
