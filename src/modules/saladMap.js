@@ -1,4 +1,5 @@
-// This module is reserved for the corresponding feature area as the codebase continues to be decomposed.
-// The current refactor moves shared constants, persistence, utilities, and app bootstrapping behind modules
-// without changing runtime behavior.
-export {};
+export function isSaladRelatedStore(store, layer) {
+  if (!store.layerId) return true;
+  const haystack = [store.layerName, store.category, store.description, layer?.name, layer?.fileName].join(' ').toLowerCase();
+  return haystack.includes('サラダ') || haystack.includes('salad');
+}

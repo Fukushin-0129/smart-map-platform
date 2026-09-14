@@ -4,6 +4,7 @@ import { distanceMeters, escapeHtml, isValidCoordinate, readFileAsDataUrl } from
 import { isSupabaseConfigured, loadFlyerPlacesFromSupabase, saveFlyerPlacesToSupabase } from './supabaseFlyers.js';
 import { readPhotoGps } from './gpsImport.js';
 import { csvCell, mergeFlyerApartments, normalizeFlyerStatus, parseCsv, rowsToFlyerApartments } from './csvImport.js';
+import { isSaladRelatedStore } from './saladMap.js';
 
 let map;
 let userMarker;
@@ -1902,13 +1903,6 @@ function visibleFlyerPlaces() {
   return filteredFlyerApartments().filter((apt) => isValidCoordinate(apt.lat, apt.lng));
 }
 
-function isSaladRelatedStore(store) {
-  if (!store.layerId) return true;
-  const layer = getLayerById(store.layerId);
-  const haystack = [store.layerName, store.category, store.description, layer?.name, layer?.fileName].join(' ').toLowerCase();
-  return haystack.includes('サラダ') || haystack.includes('salad');
-}
-
 function closeHiddenPlaceDetail() {
   if (!openPlaceDetailRef) return;
   const visible = openPlaceDetailRef.type === 'store'
@@ -1921,7 +1915,7 @@ function filteredStores() {
   const keyword = elements.searchInput.value.trim().toLowerCase();
   const visibleLayerIds = new Set(layers.filter((layer) => isLayerVisible(layer.id)).map((layer) => layer.id));
   const defaultStoresVisible = isLayerVisible('default-stores');
-  const modeFilteredStores = displayMode === 'flyer' ? [] : stores.filter((store) => displayMode === 'all' || isSaladRelatedStore(store));
+  const modeFilteredStores = displayMode === 'flyer' ? [] : stores.filter((store) => displayMode === 'all' || isSaladRelatedStore(store, getLayerById(store.layerId)));
   const layerFilteredStores = modeFilteredStores.filter((store) => store.layerId ? visibleLayerIds.has(store.layerId) : defaultStoresVisible);
   if (!keyword) return layerFilteredStores;
   return layerFilteredStores.filter((store) => [store.name, store.category, store.description, store.layerName, store.address].some((value) => String(value || '').toLowerCase().includes(keyword)));
