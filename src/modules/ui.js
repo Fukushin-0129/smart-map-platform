@@ -169,6 +169,7 @@ app.innerHTML = `
             <p class="hint">JPEG・HEIC写真のExif GPSから位置を読み取り、地図を移動して近くの候補を検索します。GPS情報がない場合はお知らせします。</p>
             <p id="photoStatus" class="import-status" aria-live="polite"></p>
             <div id="photoReview" class="photo-review"></div>
+            <div id="photoPlaceCandidates" class="candidate-list photo-candidate-list" aria-live="polite"></div>
           </div>
 
           <hr class="panel-divider" />
@@ -285,6 +286,7 @@ const elements = {
   photoInput: document.querySelector('#photoInput'),
   photoStatus: document.querySelector('#photoStatus'),
   photoReview: document.querySelector('#photoReview'),
+  photoPlaceCandidates: document.querySelector('#photoPlaceCandidates'),
   csvInput: document.querySelector('#csvInput'),
   csvStatus: document.querySelector('#csvStatus'),
   assigneeFilter: document.querySelector('#assigneeFilter'),
@@ -598,6 +600,25 @@ function bindEvents() {
     elements.placeSearchStatus.textContent = '';
     renderPlaceCandidates();
   });
+  [elements.placeCandidates, elements.photoPlaceCandidates].forEach((candidateList) => {
+    candidateList.addEventListener('click', (event) => {
+      const button = event.target.closest('button');
+      if (!button || !candidateList.contains(button)) return;
+      const card = button.closest('.candidate-card');
+      const categoryLayerValue = card?.querySelector('select')?.value || '';
+
+      if (button.matches('[data-register-place]')) {
+        event.preventDefault();
+        registerPlaceCandidate(button.dataset.registerPlace, button.dataset.source, button.dataset.groupId || null, categoryLayerValue);
+      } else if (button.matches('[data-attach-photo-place]')) {
+        event.preventDefault();
+        attachPhotoPlaceCandidate(button.dataset.attachPhotoPlace, button.dataset.storeId);
+      } else if (button.matches('[data-create-photo-spot]')) {
+        event.preventDefault();
+        createPhotoFallbackSpot(button.dataset.createPhotoSpot, categoryLayerValue);
+      }
+    });
+  });
   elements.csvInput.addEventListener('change', importCsvFile);
   elements.createTwoPersonRouteButton.addEventListener('click', createTwoPersonRoutes);
   elements.exportFlyerCsvButton.addEventListener('click', exportFlyerCsv);
@@ -846,6 +867,9 @@ async function importPhotoFiles(event) {
     renderStoreList();
     renderPhotoReview();
     renderPlaceCandidates();
+    if (photoPlaceCandidates.some((group) => !previousCandidateIds.has(group.id))) {
+      elements.photoPlaceCandidates.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
     renderMarkers();
     const importedOrigins = photoPlaceCandidates.filter((group) => !previousCandidateIds.has(group.id)).map((group) => group.origin);
     fitMapToVisibleData({ items: importedOrigins });
@@ -1031,11 +1055,11 @@ function renderPlaceCandidates() {
           <strong>既存店舗に追加する: ${escapeHtml(candidate.store.name)}</strong>
           <p>${Math.round(candidate.distance)}m / ${escapeHtml(displayCategoryLayer(candidate.store))}</p>
         </div>
-        <button data-attach-photo-place="${group.id}" data-store-id="${candidate.store.id}" class="primary">写真を追加</button>
+        <button type="button" data-attach-photo-place="${group.id}" data-store-id="${candidate.store.id}" class="primary">写真を追加</button>
       </article>`).join('');
     const places = group.placeCandidates.map((place, index) => renderPlaceCandidateCard(place, 'photo', `${group.id}:${index}`, group.id)).join('');
     const fallback = !group.existingCandidates.length && !group.placeCandidates.length
-      ? `<article class="candidate-card"><div><p>近くのカフェ・飲食店候補が見つかりませんでした。</p>${renderCategoryLayerSelect(`fallback-layer-${escapeHtml(group.id)}`)}</div><button data-create-photo-spot="${group.id}">写真位置で新規登録</button></article>`
+      ? `<article class="candidate-card"><div><p>近くのカフェ・飲食店候補が見つかりませんでした。</p>${renderCategoryLayerSelect(`fallback-layer-${escapeHtml(group.id)}`)}</div><button type="button" data-create-photo-spot="${group.id}">写真位置で新規登録</button></article>`
       : '';
     return `<section class="photo-place-group">
       <h3>${escapeHtml(group.photo.name)} の候補</h3>
@@ -1044,16 +1068,8 @@ function renderPlaceCandidates() {
     </section>`;
   }).join('');
 
-  elements.placeCandidates.innerHTML = [keywordItems, photoItems].filter(Boolean).join('') || '<p class="empty">検索またはGPS付き写真の読み込みで候補が表示されます。</p>';
-  elements.placeCandidates.querySelectorAll('[data-register-place]').forEach((button) => {
-    button.addEventListener('click', () => registerPlaceCandidate(button.dataset.registerPlace, button.dataset.source, button.dataset.groupId || null, button.closest('.candidate-card')?.querySelector('select')?.value || ''));
-  });
-  elements.placeCandidates.querySelectorAll('[data-attach-photo-place]').forEach((button) => {
-    button.addEventListener('click', () => attachPhotoPlaceCandidate(button.dataset.attachPhotoPlace, button.dataset.storeId));
-  });
-  elements.placeCandidates.querySelectorAll('[data-create-photo-spot]').forEach((button) => {
-    button.addEventListener('click', () => createPhotoFallbackSpot(button.dataset.createPhotoSpot, button.closest('.candidate-card')?.querySelector('select')?.value || ''));
-  });
+  elements.placeCandidates.innerHTML = keywordItems || '<p class="empty">店名・キーワードで候補を検索できます。</p>';
+  elements.photoPlaceCandidates.innerHTML = photoItems;
 }
 
 function renderPlaceCandidateCard(place, source, id, groupId) {
@@ -1068,7 +1084,7 @@ function renderPlaceCandidateCard(place, source, id, groupId) {
         <small>${escapeHtml(mode)}</small>
         ${renderCategoryLayerSelect(`candidate-layer-${escapeHtml(id)}`)}
       </div>
-      <button data-register-place="${escapeHtml(id)}" data-source="${source}" ${groupId ? `data-group-id="${escapeHtml(groupId)}"` : ''} class="primary">登録</button>
+      <button type="button" data-register-place="${escapeHtml(id)}" data-source="${source}" ${groupId ? `data-group-id="${escapeHtml(groupId)}"` : ''} class="primary">登録</button>
     </article>`;
 }
 
@@ -1092,6 +1108,9 @@ function registerPlaceCandidate(id, source, groupId, categoryLayerValue = '') {
   renderPlaceCandidates();
   renderMarkers();
   focusStore(store.id);
+  const message = source === 'photo' ? '写真付きで店舗を登録しました。' : '店舗を登録しました。';
+  elements.photoStatus.textContent = message;
+  showToast(message);
 }
 
 function attachPhotoPlaceCandidate(groupId, storeId) {
