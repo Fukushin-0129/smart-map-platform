@@ -75,15 +75,17 @@ app.innerHTML = `
         <div class="fab-group">
           <button id="addFabButton" class="add-fab" type="button" aria-haspopup="true" aria-expanded="false">＋</button>
           <div id="addFabMenu" class="add-fab-menu" hidden>
-            <button type="button" data-open-flyer-registration>マンション名・住所から検索</button>
-            <button type="button" data-open-flyer-map-registration>地図上の位置から登録</button>
-            <button type="button" data-open-flyer-current-registration>現在地から登録</button>
-            <hr />
-            <button type="button" data-open-panel="store">店舗を登録</button>
-            <button type="button" data-locate-and-open="store">現在地から登録</button>
-            <button type="button" data-open-panel="photo">写真GPSから登録</button>
-            <button type="button" data-open-panel="csv">CSVインポート</button>
-            <button type="button" data-open-panel="csv-export">CSVエクスポート</button>
+            <p class="add-fab-menu-label" data-mode="flyer">チラシ配布</p>
+            <button type="button" data-mode="flyer" data-open-flyer-registration>マンション名・住所から検索</button>
+            <button type="button" data-mode="flyer" data-open-flyer-map-registration>地図上の位置から登録</button>
+            <button type="button" data-mode="flyer" data-open-flyer-current-registration>現在地から登録</button>
+            <button type="button" data-mode="flyer" data-open-panel="csv">CSVインポート</button>
+            <button type="button" data-mode="flyer" data-open-panel="csv-export">CSVエクスポート</button>
+            <hr id="addFabDivider" />
+            <p class="add-fab-menu-label" data-mode="salad">サラダマップ</p>
+            <button type="button" data-mode="salad" data-open-panel="store">店舗を登録</button>
+            <button type="button" data-mode="salad" data-locate-and-open="store">現在地から登録</button>
+            <button type="button" data-mode="salad" data-open-panel="photo">写真GPSから登録</button>
           </div>
         </div>
       </div>
@@ -123,13 +125,15 @@ app.innerHTML = `
 
       <nav class="drawer-menu" aria-label="管理機能">
         <button type="button" data-open-panel="layers">レイヤー</button>
-        <button type="button" data-open-panel="store">店舗登録</button>
-        <button type="button" data-open-panel="csv">CSVインポート</button>
-        <button type="button" data-open-panel="csv-export">CSVエクスポート</button>
-        <button type="button" data-open-panel="kml">KMLインポート</button>
-        <button type="button" data-open-panel="photo">写真GPS</button>
-        <button type="button" data-open-panel="assignees">担当者管理</button>
-        <button type="button" data-open-panel="flyer">チラシ配布管理</button>
+        <p class="drawer-menu-label" data-mode="salad">サラダマップ</p>
+        <button type="button" data-mode="salad" data-open-panel="store">店舗登録</button>
+        <button type="button" data-mode="salad" data-open-panel="kml">KMLインポート</button>
+        <button type="button" data-mode="salad" data-open-panel="photo">写真GPS</button>
+        <p class="drawer-menu-label" data-mode="flyer">チラシ配布</p>
+        <button type="button" data-mode="flyer" data-open-panel="csv">CSVインポート</button>
+        <button type="button" data-mode="flyer" data-open-panel="csv-export">CSVエクスポート</button>
+        <button type="button" data-mode="flyer" data-open-panel="assignees">担当者管理</button>
+        <button type="button" data-mode="flyer" data-open-panel="flyer">チラシ配布管理</button>
         <button type="button" data-open-panel="settings">設定</button>
       </nav>
 
@@ -1522,6 +1526,15 @@ function renderDisplayModeMenu() {
     input.checked = input.value === displayMode;
     input.closest('.display-mode-option')?.classList.toggle('active', input.checked);
   });
+  applyMenuModeVisibility();
+}
+
+function applyMenuModeVisibility() {
+  document.querySelectorAll('[data-mode]').forEach((element) => {
+    element.hidden = displayMode !== 'all' && element.dataset.mode !== displayMode;
+  });
+  const addFabDivider = document.querySelector('#addFabDivider');
+  if (addFabDivider) addFabDivider.hidden = displayMode !== 'all';
 }
 
 function setDisplayMode(nextMode) {
