@@ -104,6 +104,8 @@ input:focus, textarea:focus, select:focus { outline: 3px solid #bbf7d0; border-c
 .photo-place-group { padding: 0.8rem; border: 1px dashed #bbdfc4; border-radius: 18px; background: #f8fff9; }
 .photo-place-group h3 { margin: 0; font-size: 0.95rem; color: #31553b; }
 .photo-place-group > img { width: 72px; height: 72px; object-fit: cover; border-radius: 14px; border: 1px solid #d9f4df; }
+.photo-candidate-list { margin-top: 0.85rem; }
+.photo-candidate-list:empty { display: none; }
 
 @media (max-width: 560px) {
   .candidate-card { grid-template-columns: 1fr; }
