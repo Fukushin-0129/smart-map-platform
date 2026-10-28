@@ -1088,6 +1088,21 @@ function renderPlaceCandidateCard(place, source, id, groupId) {
     </article>`;
 }
 
+function trySaveStores(nextStores) {
+  try {
+    saveStores(nextStores);
+    return true;
+  } catch (error) {
+    console.error('店舗データの保存に失敗しました。', error);
+    const message = error?.name === 'QuotaExceededError'
+      ? 'ブラウザの保存容量が上限に達したため登録できませんでした。写真を減らすか、不要なデータを削除してから再度お試しください。'
+      : '店舗データの保存に失敗しました。';
+    elements.photoStatus.textContent = message;
+    showToast(message);
+    return false;
+  }
+}
+
 function registerPlaceCandidate(id, source, groupId, categoryLayerValue = '') {
   const group = groupId ? photoPlaceCandidates.find((item) => item.id === groupId) : null;
   const place = source === 'keyword'
@@ -1100,10 +1115,11 @@ function registerPlaceCandidate(id, source, groupId, categoryLayerValue = '') {
     elements.placeSearchStatus.textContent = '候補の位置情報を取得できないため登録できません。';
     return;
   }
-  stores = [store, ...stores];
+  const nextStores = [store, ...stores];
+  if (!trySaveStores(nextStores)) return;
+  stores = nextStores;
   if (source === 'keyword') keywordPlaceCandidates = keywordPlaceCandidates.filter((item) => item.id !== id);
   if (group) photoPlaceCandidates = photoPlaceCandidates.filter((item) => item.id !== group.id);
-  saveStores(stores);
   renderStoreList();
   renderPlaceCandidates();
   renderMarkers();
@@ -1116,9 +1132,10 @@ function registerPlaceCandidate(id, source, groupId, categoryLayerValue = '') {
 function attachPhotoPlaceCandidate(groupId, storeId) {
   const group = photoPlaceCandidates.find((item) => item.id === groupId);
   if (!group) return;
-  stores = addPhotoToStore(stores, storeId, group.photo);
+  const nextStores = addPhotoToStore(stores, storeId, group.photo);
+  if (!trySaveStores(nextStores)) return;
+  stores = nextStores;
   photoPlaceCandidates = photoPlaceCandidates.filter((item) => item.id !== groupId);
-  saveStores(stores);
   renderStoreList();
   renderPlaceCandidates();
   renderMarkers();
@@ -1129,9 +1146,10 @@ function createPhotoFallbackSpot(groupId, categoryLayerValue = '') {
   const group = photoPlaceCandidates.find((item) => item.id === groupId);
   if (!group) return;
   const store = createPhotoSpot(group.photo, categoryLayerValue);
-  stores = [store, ...stores];
+  const nextStores = [store, ...stores];
+  if (!trySaveStores(nextStores)) return;
+  stores = nextStores;
   photoPlaceCandidates = photoPlaceCandidates.filter((item) => item.id !== groupId);
-  saveStores(stores);
   renderStoreList();
   renderPlaceCandidates();
   renderMarkers();
