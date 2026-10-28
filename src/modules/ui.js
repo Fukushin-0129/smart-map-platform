@@ -169,6 +169,7 @@ app.innerHTML = `
             <p class="hint">JPEG・HEIC写真のExif GPSから位置を読み取り、地図を移動して近くの候補を検索します。GPS情報がない場合はお知らせします。</p>
             <p id="photoStatus" class="import-status" aria-live="polite"></p>
             <div id="photoReview" class="photo-review"></div>
+            <div id="photoPlaceCandidates" class="candidate-list photo-candidate-list" aria-live="polite"></div>
           </div>
 
           <hr class="panel-divider" />
@@ -285,6 +286,7 @@ const elements = {
   photoInput: document.querySelector('#photoInput'),
   photoStatus: document.querySelector('#photoStatus'),
   photoReview: document.querySelector('#photoReview'),
+  photoPlaceCandidates: document.querySelector('#photoPlaceCandidates'),
   csvInput: document.querySelector('#csvInput'),
   csvStatus: document.querySelector('#csvStatus'),
   assigneeFilter: document.querySelector('#assigneeFilter'),
@@ -598,22 +600,24 @@ function bindEvents() {
     elements.placeSearchStatus.textContent = '';
     renderPlaceCandidates();
   });
-  elements.placeCandidates.addEventListener('click', (event) => {
-    const button = event.target.closest('button');
-    if (!button || !elements.placeCandidates.contains(button)) return;
-    const card = button.closest('.candidate-card');
-    const categoryLayerValue = card?.querySelector('select')?.value || '';
+  [elements.placeCandidates, elements.photoPlaceCandidates].forEach((candidateList) => {
+    candidateList.addEventListener('click', (event) => {
+      const button = event.target.closest('button');
+      if (!button || !candidateList.contains(button)) return;
+      const card = button.closest('.candidate-card');
+      const categoryLayerValue = card?.querySelector('select')?.value || '';
 
-    if (button.matches('[data-register-place]')) {
-      event.preventDefault();
-      registerPlaceCandidate(button.dataset.registerPlace, button.dataset.source, button.dataset.groupId || null, categoryLayerValue);
-    } else if (button.matches('[data-attach-photo-place]')) {
-      event.preventDefault();
-      attachPhotoPlaceCandidate(button.dataset.attachPhotoPlace, button.dataset.storeId);
-    } else if (button.matches('[data-create-photo-spot]')) {
-      event.preventDefault();
-      createPhotoFallbackSpot(button.dataset.createPhotoSpot, categoryLayerValue);
-    }
+      if (button.matches('[data-register-place]')) {
+        event.preventDefault();
+        registerPlaceCandidate(button.dataset.registerPlace, button.dataset.source, button.dataset.groupId || null, categoryLayerValue);
+      } else if (button.matches('[data-attach-photo-place]')) {
+        event.preventDefault();
+        attachPhotoPlaceCandidate(button.dataset.attachPhotoPlace, button.dataset.storeId);
+      } else if (button.matches('[data-create-photo-spot]')) {
+        event.preventDefault();
+        createPhotoFallbackSpot(button.dataset.createPhotoSpot, categoryLayerValue);
+      }
+    });
   });
   elements.csvInput.addEventListener('change', importCsvFile);
   elements.createTwoPersonRouteButton.addEventListener('click', createTwoPersonRoutes);
@@ -863,6 +867,9 @@ async function importPhotoFiles(event) {
     renderStoreList();
     renderPhotoReview();
     renderPlaceCandidates();
+    if (photoPlaceCandidates.some((group) => !previousCandidateIds.has(group.id))) {
+      elements.photoPlaceCandidates.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
     renderMarkers();
     const importedOrigins = photoPlaceCandidates.filter((group) => !previousCandidateIds.has(group.id)).map((group) => group.origin);
     fitMapToVisibleData({ items: importedOrigins });
@@ -1061,7 +1068,8 @@ function renderPlaceCandidates() {
     </section>`;
   }).join('');
 
-  elements.placeCandidates.innerHTML = [keywordItems, photoItems].filter(Boolean).join('') || '<p class="empty">検索またはGPS付き写真の読み込みで候補が表示されます。</p>';
+  elements.placeCandidates.innerHTML = keywordItems || '<p class="empty">店名・キーワードで候補を検索できます。</p>';
+  elements.photoPlaceCandidates.innerHTML = photoItems;
 }
 
 function renderPlaceCandidateCard(place, source, id, groupId) {
