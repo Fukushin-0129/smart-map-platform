@@ -1101,7 +1101,8 @@ function registerPlaceCandidate(id, source, groupId, categoryLayerValue = '') {
   renderMarkers();
   focusStore(store.id);
   const message = source === 'photo' ? '写真付きで店舗を登録しました。' : '店舗を登録しました。';
-  elements.photoStatus.textContent = message;
+  const statusElement = source === 'photo' ? elements.photoStatus : elements.placeSearchStatus;
+  statusElement.textContent = message;
   showToast(message);
 }
 
