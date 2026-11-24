@@ -127,9 +127,9 @@ npm run check
 
 ビルド成果物は `dist/` に作成されます。`dist/config.js` には環境変数 `GOOGLE_MAPS_API_KEY` の値が書き込まれます。
 
-## Supabaseでチラシ配布データを共有する
+## Supabaseで地図データを共有する
 
-チラシ配布データ（`flyerApartments`）だけをSupabaseの `flyer_places` テーブルにも保存できます。店舗データ、サラダデータ、KML/CSV形式、既存のlocalStorageバックアップは変更しません。Supabaseが未設定、または接続に失敗した場合は従来どおりlocalStorageのデータで起動します。
+チラシ配布データに加えて、サラダマップの店舗・写真・KMLレイヤー・レイヤーの表示状態もSupabaseへ保存できます。Supabaseが未設定、または接続に失敗した場合は、従来どおり端末のlocalStorageを使って起動します。
 
 ### 接続設定
 
@@ -142,15 +142,28 @@ VITE_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
 
 ビルド時に `scripts/build.mjs` が `VITE_SUPABASE_URL` と `VITE_SUPABASE_ANON_KEY` を `dist/config.js` へ反映します。未設定の場合は従来どおりlocalStorageのみで動作します。
 
-### 最小テーブル
+### 最初に実行するSQL
 
-動作確認用SQLは `supabase/flyer_places.sql` にあります。認証なしで確認できる開発用RLSポリシーを含みますが、本番運用では必ず認証とRLS（Row Level Security）を設計してください。
+Supabaseの **SQL Editor** で、次の2ファイルの内容をそれぞれ実行してください。
 
-### 動作
+- `supabase/flyer_places.sql` — チラシ配布データ用
+- `supabase/salad_map_state.sql` — サラダマップの店舗・写真・KMLレイヤー用
+
+いずれも動作確認用の最小RLSポリシーを含みます。本番運用では必ずSupabase Authと、利用者・プロジェクトごとの書き込み権限を設計してください。
+
+### サラダマップの移行と同期
+
+1. Supabase接続後、アプリ左上のメニューを開きます。
+2. 表示モードの下にある **「サラダマップを共有データへ移行」** を一度だけ押します。
+3. 端末に保存されていた店舗・写真・KMLレイヤーが、共有データへコピーされます。
+4. 以後、店舗の登録・削除・写真追加、KMLのインポート、レイヤー表示の切り替えは、端末保存とSupabase保存を同時に行います。
+
+初回移行前は、既存の端末データとSupabase上の共有データを読み込んで表示します。誤って上書きしないため、共有データへの書き込みは移行ボタンを押したときから始まります。
+
+### チラシ配布データの移行と同期
 
 - 起動時にSupabaseから `flyer_places` を読み込み、localStorageの `smart-map-platform:flyer-apartments` と `updatedAt` の新しい方を採用してマージします。
 - Supabase側が空でlocalStorageに既存のチラシ配布データがある場合、チラシ配布一覧の「共有データへ移行」ボタンから明示的にupsert移行できます。
 - 配布状況、配布日、担当者、配布枚数、メモ、CSV取り込み後のチラシ配布データはlocalStorageへ保存しつつSupabaseにもupsertします。保存失敗分は `smart-map-platform:flyer-sync-queue` に同期待ちとして残します。
-- Supabase接続・保存に失敗してもlocalStorageバックアップを使うため、アプリが真っ白にならない設計です。
 
-> **重要:** 今回は動作確認を優先して、認証なしでも使える最小構成にしています。本番運用ではSupabase Authなどの認証、RLSポリシー、書き込み権限の制限、プロジェクトごとのデータ分離を必ず設定してください。
+> **重要:** この最小構成では、店舗の写真も既存のデータ形式のままSupabaseに保存します。写真が多くなる本番運用では、Supabase Storageに画像本体を置き、テーブルには画像URLだけを保存する構成へ移行してください。
