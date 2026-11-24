@@ -764,7 +764,7 @@ function bindEvents() {
     candidateList.addEventListener('click', (event) => {
       const button = event.target.closest('button');
       if (!button || !candidateList.contains(button)) return;
-      runPlaceCandidateAction(button);
+      void runPlaceCandidateAction(button);
     });
   });
   elements.csvInput.addEventListener('change', importCsvFile);
@@ -1230,12 +1230,12 @@ function bindPlaceCandidateActions(candidateList) {
     button.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      runPlaceCandidateAction(button);
+      void runPlaceCandidateAction(button);
     });
   });
 }
 
-function runPlaceCandidateAction(button) {
+async function runPlaceCandidateAction(button) {
   if (button.disabled) return;
   const card = button.closest('.candidate-card');
   const categoryLayerValue = card?.querySelector('select')?.value || '';
@@ -1243,15 +1243,19 @@ function runPlaceCandidateAction(button) {
   button.disabled = true;
   button.textContent = '登録中...';
 
-  if (button.matches('[data-register-place]')) {
-    registerPlaceCandidate(button.dataset.registerPlace, button.dataset.source, button.dataset.groupId || null, categoryLayerValue);
-  } else if (button.matches('[data-attach-photo-place]')) {
-    attachPhotoPlaceCandidate(button.dataset.attachPhotoPlace, button.dataset.storeId);
-  } else if (button.matches('[data-create-photo-spot]')) {
-    createPhotoFallbackSpot(button.dataset.createPhotoSpot, categoryLayerValue);
-  } else {
-    button.disabled = false;
-    button.textContent = label;
+  try {
+    if (button.matches('[data-register-place]')) {
+      await registerPlaceCandidate(button.dataset.registerPlace, button.dataset.source, button.dataset.groupId || null, categoryLayerValue);
+    } else if (button.matches('[data-attach-photo-place]')) {
+      await attachPhotoPlaceCandidate(button.dataset.attachPhotoPlace, button.dataset.storeId);
+    } else if (button.matches('[data-create-photo-spot]')) {
+      await createPhotoFallbackSpot(button.dataset.createPhotoSpot, categoryLayerValue);
+    }
+  } finally {
+    if (button.isConnected) {
+      button.disabled = false;
+      button.textContent = label;
+    }
   }
 }
 
@@ -1271,11 +1275,25 @@ function renderPlaceCandidateCard(place, source, id, groupId) {
     </article>`;
 }
 
-function trySaveStores(nextStores) {
+async function trySaveStores(nextStores) {
   try {
     saveStores(nextStores);
-    syncSaladState({ stores: nextStores, layers, layerVisibility });
-    return true;
+
+    if (!isSaladSupabaseConfigured()) {
+      updateSaladSyncStatus('サラダマップ: オフラインデータを使用しています');
+      return true;
+    }
+
+    updateSaladSyncStatus('サラダマップ: 保存中...');
+    const result = await saveSaladMapStateToSupabase({ stores: nextStores, layers, layerVisibility });
+    if (result.ok) {
+      updateSaladSyncStatus('サラダマップ: 同期済み');
+      return true;
+    }
+
+    updateSaladSyncStatus('サラダマップ: 端末へ保存しました。共有データへの同期を再試行します');
+    showToast('共有データへ保存できませんでした。通信を確認してもう一度登録してください。');
+    return false;
   } catch (error) {
     console.error('店舗データの保存に失敗しました。', error);
     const message = error?.name === 'QuotaExceededError'
@@ -1287,7 +1305,7 @@ function trySaveStores(nextStores) {
   }
 }
 
-function registerPlaceCandidate(id, source, groupId, categoryLayerValue = '') {
+async function registerPlaceCandidate(id, source, groupId, categoryLayerValue = '') {
   const group = groupId ? photoPlaceCandidates.find((item) => item.id === groupId) : null;
   const place = source === 'keyword'
     ? keywordPlaceCandidates.find((item) => item.id === id)?.place
@@ -1300,7 +1318,7 @@ function registerPlaceCandidate(id, source, groupId, categoryLayerValue = '') {
     return;
   }
   const nextStores = [store, ...stores];
-  if (!trySaveStores(nextStores)) return;
+  if (!await trySaveStores(nextStores)) return;
   stores = nextStores;
   if (source === 'keyword') keywordPlaceCandidates = keywordPlaceCandidates.filter((item) => item.id !== id);
   if (group) photoPlaceCandidates = photoPlaceCandidates.filter((item) => item.id !== group.id);
@@ -1314,7 +1332,7 @@ function registerPlaceCandidate(id, source, groupId, categoryLayerValue = '') {
   showToast(message);
 }
 
-function attachPhotoPlaceCandidate(groupId, storeId) {
+async function attachPhotoPlaceCandidate(groupId, storeId) {
   const group = photoPlaceCandidates.find((item) => item.id === groupId);
   if (!group) return;
   const nextStores = addPhotoToStore(stores, storeId, group.photo);
@@ -1327,7 +1345,7 @@ function attachPhotoPlaceCandidate(groupId, storeId) {
   focusStore(storeId);
 }
 
-function createPhotoFallbackSpot(groupId, categoryLayerValue = '') {
+async function createPhotoFallbackSpot(groupId, categoryLayerValue = '') {
   const group = photoPlaceCandidates.find((item) => item.id === groupId);
   if (!group) return;
   const store = createPhotoSpot(group.photo, categoryLayerValue);
