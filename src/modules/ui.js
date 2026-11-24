@@ -606,6 +606,7 @@ function persistFlyerApartments(itemsToSync = flyerApartments) {
 export async function initializeApp() {
   await initializeSaladStorage();
   await initializeFlyerStorage();
+  selectMobileDefaultMode();
   renderCategoryLayerOptions();
   renderLayerList();
   renderAssignees();
@@ -722,7 +723,14 @@ function bindEvents() {
     });
   });
   elements.displayModeInputs.forEach((input) => input.addEventListener('change', () => setDisplayMode(input.value)));
-  elements.modeButtons.forEach((button) => button.addEventListener('click', () => setDisplayMode(button.dataset.selectMode)));
+  elements.modeButtons.forEach((button) => {
+    const chooseMode = (event) => {
+      if (event.type === 'touchend') event.preventDefault();
+      setDisplayMode(button.dataset.selectMode);
+    };
+    button.addEventListener('click', chooseMode);
+    button.addEventListener('touchend', chooseMode, { passive: false });
+  });
   elements.addFabButton.addEventListener('click', () => toggleAddMenu());
   document.querySelector('[data-open-flyer-registration]')?.addEventListener('click', () => openFlyerRegistrationPanel('search'));
   document.querySelector('[data-open-flyer-map-registration]')?.addEventListener('click', () => openFlyerRegistrationPanel('map'));
@@ -1685,6 +1693,12 @@ function bindPlaceMarkerClick(marker, openDetail) {
 
 function normalizeDisplayMode(value) {
   return DISPLAY_MODES.some((mode) => mode.id === value) ? value : 'all';
+}
+
+function selectMobileDefaultMode() {
+  if (displayMode !== 'all' || !window.matchMedia?.('(max-width: 560px)').matches) return;
+  displayMode = 'salad';
+  saveDisplayMode(displayMode);
 }
 
 function displayModeLabel(modeId = displayMode) {
