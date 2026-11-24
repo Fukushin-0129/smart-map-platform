@@ -1982,9 +1982,10 @@ function toggleLayer(layerId, visible) {
   layerVisibility = { ...layerVisibility, [layerId]: visible };
   if (layerId !== FLYER_LAYER.id) {
     layers = layers.map((layer) => layer.id === layerId ? { ...layer, visible } : layer);
-    saveLayers(layers);
+    persistSaladState();
+  } else {
+    saveLayerVisibility(layerVisibility);
   }
-  saveLayerVisibility(layerVisibility);
   renderLayerList();
   renderStoreList();
   renderFlyerList();
