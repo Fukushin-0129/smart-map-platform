@@ -1071,7 +1071,7 @@ async function importSinglePhoto(file, stats) {
       return `${file.name}: ${Math.round(nearest.distance)}m先の既存店舗「${nearest.store.name}」へ追加しました。`;
     }
     const existingCandidates = findNearbyStores(gps.lat, gps.lng, CANDIDATE_STORE_METERS);
-    const placeCandidates = nearest && nearest.distance > CANDIDATE_STORE_METERS ? [] : await searchNearbyFoodPlaces(gps.lat, gps.lng);
+    const placeCandidates = await searchNearbyFoodPlaces(gps.lat, gps.lng);
     if (!existingCandidates.length && (!nearest || nearest.distance > CANDIDATE_STORE_METERS)) stats.created += 1;
     photoPlaceCandidates = [{
       id: crypto.randomUUID(),
