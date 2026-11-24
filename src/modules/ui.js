@@ -54,6 +54,27 @@ app.innerHTML = `
         </div>
       </div>
 
+      <section id="modeLanding" class="mode-landing" aria-labelledby="modeLandingTitle">
+        <p class="mode-landing-eyebrow">SMART MAP PLATFORM</p>
+        <h1 id="modeLandingTitle">今日は、どの地図を使いますか？</h1>
+        <p class="mode-landing-description">用途を選ぶと、地図・検索・登録メニューをその仕事に合わせて切り替えます。</p>
+        <div class="mode-choice-grid">
+          <button type="button" class="mode-choice" data-select-mode="salad">
+            <span class="mode-choice-icon" aria-hidden="true">🥗</span>
+            <span><strong>サラダマップ</strong><small>カフェ・飲食店を探す／写真から登録する</small></span>
+          </button>
+          <button type="button" class="mode-choice" data-select-mode="flyer">
+            <span class="mode-choice-icon" aria-hidden="true">📬</span>
+            <span><strong>チラシ配布マップ</strong><small>配布先・担当者・状況・ルートを管理する</small></span>
+          </button>
+        </div>
+      </section>
+
+      <div id="mapModeSwitcher" class="map-mode-switcher" role="group" aria-label="地図の用途を切り替える">
+        <button type="button" data-select-mode="salad"><span aria-hidden="true">🥗</span> サラダマップ</button>
+        <button type="button" data-select-mode="flyer"><span aria-hidden="true">📬</span> チラシ配布</button>
+      </div>
+
       <div class="map-topbar" aria-label="地図検索">
         <button type="button" id="menuButton" class="icon-button menu-button" aria-label="メニューを開く" aria-expanded="false">☰</button>
         <label class="map-search-label">
@@ -268,6 +289,9 @@ const elements = {
   mapStatus: document.querySelector('#mapStatus'),
   appToast: document.querySelector('#appToast'),
   mapSetup: document.querySelector('#mapSetup'),
+  modeLanding: document.querySelector('#modeLanding'),
+  modeButtons: Array.from(document.querySelectorAll('[data-select-mode]')),
+  mapModeSwitcher: document.querySelector('#mapModeSwitcher'),
   menuButton: document.querySelector('#menuButton'),
   closeDrawerButton: document.querySelector('#closeDrawerButton'),
   drawerBackdrop: document.querySelector('#drawerBackdrop'),
@@ -575,6 +599,7 @@ function bindEvents() {
     });
   });
   elements.displayModeInputs.forEach((input) => input.addEventListener('change', () => setDisplayMode(input.value)));
+  elements.modeButtons.forEach((button) => button.addEventListener('click', () => setDisplayMode(button.dataset.selectMode)));
   elements.addFabButton.addEventListener('click', () => toggleAddMenu());
   document.querySelector('[data-open-flyer-registration]')?.addEventListener('click', () => openFlyerRegistrationPanel('search'));
   document.querySelector('[data-open-flyer-map-registration]')?.addEventListener('click', () => openFlyerRegistrationPanel('map'));
@@ -1526,6 +1551,14 @@ function renderDisplayModeMenu() {
     input.checked = input.value === displayMode;
     input.closest('.display-mode-option')?.classList.toggle('active', input.checked);
   });
+  elements.modeLanding.hidden = displayMode !== 'all';
+  elements.mapModeSwitcher.hidden = displayMode === 'all';
+  elements.modeButtons.forEach((button) => {
+    const selected = button.dataset.selectMode === displayMode;
+    button.classList.toggle('active', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  });
+  document.querySelector('.map-stage')?.setAttribute('data-active-mode', displayMode);
   applyMenuModeVisibility();
 }
 
@@ -1540,6 +1573,7 @@ function applyMenuModeVisibility() {
 function setDisplayMode(nextMode) {
   displayMode = normalizeDisplayMode(nextMode);
   saveDisplayMode(displayMode);
+  closeAddMenu();
   renderDisplayModeMenu();
   renderStoreList();
   renderFlyerList();
