@@ -1,7 +1,8 @@
 import { CANDIDATE_STORE_METERS, DEFAULT_ASSIGNEES, DEFAULT_CENTER, DEFAULT_ZOOM, FLYER_LAYER, FLYER_STATUS_COLORS, FLYER_STATUSES, GOOGLE_MAPS_API_KEY, LAYER_COLORS, NEAR_STORE_METERS } from './constants.js';
-import { hasMigratedFlyerPlaces, loadDisplayMode, loadFlyerApartments, loadFlyerAssignees, loadFlyerSyncQueue, loadLayers, loadLayerVisibility, loadMapView, loadPhotoImports, loadStores, markFlyerPlacesMigrated, saveDisplayMode, saveFlyerApartments, saveFlyerAssignees, saveFlyerSyncQueue, saveLayers, saveLayerVisibility, saveMapView, savePhotoImports, saveStores } from './storage.js';
+import { hasMigratedFlyerPlaces, hasMigratedSaladMap, loadDisplayMode, loadFlyerApartments, loadFlyerAssignees, loadFlyerSyncQueue, loadLayers, loadLayerVisibility, loadMapView, loadPhotoImports, loadStores, markFlyerPlacesMigrated, markSaladMapMigrated, saveDisplayMode, saveFlyerApartments, saveFlyerAssignees, saveFlyerSyncQueue, saveLayers, saveLayerVisibility, saveMapView, savePhotoImports, saveStores } from './storage.js';
 import { distanceMeters, escapeHtml, isValidCoordinate, readFileAsDataUrl } from './utils.js';
 import { isSupabaseConfigured, loadFlyerPlacesFromSupabase, saveFlyerPlacesToSupabase } from './supabaseFlyers.js';
+import { isSaladSupabaseConfigured, loadSaladMapStateFromSupabase, saveSaladMapStateToSupabase } from './supabaseSalad.js';
 import { readPhotoGps } from './gpsImport.js';
 
 let map;
@@ -139,8 +140,10 @@ app.innerHTML = `
             </label>`).join('')}
         </div>
         <div class="display-mode-migration">
+          <div id="saladSyncStatus" class="flyer-sync-status" aria-live="polite"></div>
+          <button type="button" id="migrateSaladButton" class="flyer-sync-button" hidden>サラダマップを共有データへ移行</button>
           <div id="flyerSyncStatus" class="flyer-sync-status" aria-live="polite"></div>
-          <button type="button" id="migrateFlyersButton" class="flyer-sync-button" hidden>初回同期して共有データへ移行</button>
+          <button type="button" id="migrateFlyersButton" class="flyer-sync-button" hidden>チラシ配布を共有データへ移行</button>
         </div>
       </section>
 
@@ -334,6 +337,8 @@ const elements = {
   flyerList: document.querySelector('#flyerList'),
   flyerCount: document.querySelector('#flyerCount'),
   flyerStatusSummary: document.querySelector('#flyerStatusSummary'),
+  saladSyncStatus: document.querySelector('#saladSyncStatus'),
+  migrateSaladButton: document.querySelector('#migrateSaladButton'),
   flyerSyncStatus: document.querySelector('#flyerSyncStatus'),
   migrateFlyersButton: document.querySelector('#migrateFlyersButton'),
   createTwoPersonRouteButton: document.querySelector('#createTwoPersonRouteButton'),
@@ -463,6 +468,119 @@ function dedupeFlyerApartments(items) {
   }, new Map()).values());
 }
 
+async function initializeSaladStorage() {
+  const localState = { stores: loadStores(), layers: loadLayers(), layerVisibility: loadLayerVisibility() };
+  stores = localState.stores;
+  layers = localState.layers;
+  layerVisibility = localState.layerVisibility;
+
+  if (!isSaladSupabaseConfigured()) {
+    updateSaladSyncStatus('サラダマップ: オフラインデータを使用しています');
+    return;
+  }
+
+  const result = await loadSaladMapStateFromSupabase();
+  if (!result.ok) {
+    console.warn(`Supabase接続に失敗したためサラダマップはlocalStorageを使用します: ${result.reason}`);
+    updateSaladSyncStatus('サラダマップ: オフラインデータを使用しています');
+    return;
+  }
+
+  if (hasMigratedSaladMap()) {
+    ({ stores, layers, layerVisibility } = result.state);
+    saveStores(stores);
+    saveLayers(layers);
+    saveLayerVisibility(layerVisibility);
+    updateSaladMigrationButton(false);
+    updateSaladSyncStatus('サラダマップ: 共有データを読み込みました');
+  } else {
+    ({ stores, layers, layerVisibility } = mergeSaladSources(localState, result.state));
+    saveStores(stores);
+    saveLayers(layers);
+    saveLayerVisibility(layerVisibility);
+    updateSaladMigrationButton(Boolean(localState.stores.length || localState.layers.length));
+    updateSaladSyncStatus('サラダマップ: 初回同期前。端末データを確認してください');
+  }
+}
+
+function mergeSaladSources(localState, remoteState) {
+  const storeMap = new Map();
+  [...(remoteState.stores || []), ...(localState.stores || [])].forEach((store) => {
+    const current = storeMap.get(store.id);
+    if (!current || Date.parse(store.updatedAt || store.createdAt || 0) >= Date.parse(current.updatedAt || current.createdAt || 0)) storeMap.set(store.id, store);
+  });
+  const layerMap = new Map([...(remoteState.layers || []), ...(localState.layers || [])].map((layer) => [layer.id, layer]));
+  return {
+    stores: Array.from(storeMap.values()),
+    layers: Array.from(layerMap.values()),
+    layerVisibility: { ...(remoteState.layerVisibility || {}), ...(localState.layerVisibility || {}) },
+  };
+}
+
+function updateSaladSyncStatus(message) {
+  if (elements.saladSyncStatus) elements.saladSyncStatus.textContent = message;
+}
+
+function updateSaladMigrationButton(visible) {
+  if (elements.migrateSaladButton) elements.migrateSaladButton.hidden = !visible;
+}
+
+async function migrateLocalSaladToSupabase() {
+  if (!isSaladSupabaseConfigured() || hasMigratedSaladMap()) {
+    updateSaladMigrationButton(false);
+    return;
+  }
+
+  const localState = { stores: loadStores(), layers: loadLayers(), layerVisibility: loadLayerVisibility() };
+  if (!localState.stores.length && !localState.layers.length) {
+    markSaladMapMigrated();
+    updateSaladMigrationButton(false);
+    updateSaladSyncStatus('サラダマップ: 移行対象の端末データはありません');
+    return;
+  }
+  if (!confirm(`サラダマップの店舗${localState.stores.length}件、KMLレイヤー${localState.layers.length}件と写真をSupabaseへ初回同期します。よろしいですか？`)) return;
+
+  updateSaladSyncStatus('サラダマップ: 初回同期中...');
+  const result = await saveSaladMapStateToSupabase(localState);
+  if (!result.ok) {
+    updateSaladSyncStatus(`サラダマップ: 初回同期に失敗しました（${result.reason}）`);
+    showToast('サラダマップの初回同期に失敗しました。端末データは保持されています');
+    return;
+  }
+
+  markSaladMapMigrated();
+  const remote = await loadSaladMapStateFromSupabase();
+  ({ stores, layers, layerVisibility } = remote.ok ? remote.state : localState);
+  saveStores(stores);
+  saveLayers(layers);
+  saveLayerVisibility(layerVisibility);
+  updateSaladMigrationButton(false);
+  updateSaladSyncStatus('サラダマップ: 初回同期が完了しました');
+  showToast('サラダマップを共有データへ移行しました');
+  renderCategoryLayerOptions();
+  renderLayerList();
+  renderStoreList();
+  renderMarkers();
+}
+
+function persistSaladState() {
+  const state = { stores, layers, layerVisibility };
+  saveStores(stores);
+  saveLayers(layers);
+  saveLayerVisibility(layerVisibility);
+  if (!isSaladSupabaseConfigured()) {
+    updateSaladSyncStatus('サラダマップ: オフラインデータを使用しています');
+    return;
+  }
+  saveSaladMapStateToSupabase(state).then((result) => {
+    if (result.ok) {
+      updateSaladSyncStatus('サラダマップ: 同期済み');
+    } else {
+      updateSaladSyncStatus('サラダマップ: 端末へ保存しました。共有データへの同期を再試行します');
+    }
+  });
+}
+
 function persistFlyerApartments(itemsToSync = flyerApartments) {
   saveFlyerApartments(flyerApartments);
   if (!isSupabaseConfigured()) {
@@ -482,6 +600,7 @@ function persistFlyerApartments(itemsToSync = flyerApartments) {
 }
 
 export async function initializeApp() {
+  await initializeSaladStorage();
   await initializeFlyerStorage();
   renderCategoryLayerOptions();
   renderLayerList();
@@ -657,6 +776,7 @@ function bindEvents() {
   elements.flyerDateFilter.addEventListener('change', rerenderFlyerFilters);
   elements.showUndeliveredButton.addEventListener('click', () => { elements.flyerStatusFilter.value = '未配布'; rerenderFlyerFilters(); });
   elements.showDeliveredButton.addEventListener('click', () => { elements.flyerStatusFilter.value = '配布済み'; rerenderFlyerFilters(); });
+  if (elements.migrateSaladButton) elements.migrateSaladButton.addEventListener('click', migrateLocalSaladToSupabase);
   if (elements.migrateFlyersButton) elements.migrateFlyersButton.addEventListener('click', migrateLocalFlyersToSupabase);
   window.addEventListener('online', flushFlyerSyncQueue);
   elements.clearFlyerFiltersButton.addEventListener('click', () => { elements.assigneeFilter.value = ''; elements.flyerStatusFilter.value = ''; elements.flyerDateFilter.value = ''; rerenderFlyerFilters(); });
