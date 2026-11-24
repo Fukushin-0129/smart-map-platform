@@ -756,19 +756,7 @@ function bindEvents() {
     candidateList.addEventListener('click', (event) => {
       const button = event.target.closest('button');
       if (!button || !candidateList.contains(button)) return;
-      const card = button.closest('.candidate-card');
-      const categoryLayerValue = card?.querySelector('select')?.value || '';
-
-      if (button.matches('[data-register-place]')) {
-        event.preventDefault();
-        registerPlaceCandidate(button.dataset.registerPlace, button.dataset.source, button.dataset.groupId || null, categoryLayerValue);
-      } else if (button.matches('[data-attach-photo-place]')) {
-        event.preventDefault();
-        attachPhotoPlaceCandidate(button.dataset.attachPhotoPlace, button.dataset.storeId);
-      } else if (button.matches('[data-create-photo-spot]')) {
-        event.preventDefault();
-        createPhotoFallbackSpot(button.dataset.createPhotoSpot, categoryLayerValue);
-      }
+      runPlaceCandidateAction(button);
     });
   });
   elements.csvInput.addEventListener('change', importCsvFile);
@@ -1223,6 +1211,40 @@ function renderPlaceCandidates() {
 
   elements.placeCandidates.innerHTML = keywordItems || '<p class="empty">店名・キーワードで候補を検索できます。</p>';
   elements.photoPlaceCandidates.innerHTML = photoItems;
+  bindPlaceCandidateActions(elements.placeCandidates);
+  bindPlaceCandidateActions(elements.photoPlaceCandidates);
+}
+
+function bindPlaceCandidateActions(candidateList) {
+  candidateList.querySelectorAll('[data-register-place], [data-attach-photo-place], [data-create-photo-spot]').forEach((button) => {
+    if (button.dataset.directCandidateActionBound) return;
+    button.dataset.directCandidateActionBound = 'true';
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      runPlaceCandidateAction(button);
+    });
+  });
+}
+
+function runPlaceCandidateAction(button) {
+  if (button.disabled) return;
+  const card = button.closest('.candidate-card');
+  const categoryLayerValue = card?.querySelector('select')?.value || '';
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = '登録中...';
+
+  if (button.matches('[data-register-place]')) {
+    registerPlaceCandidate(button.dataset.registerPlace, button.dataset.source, button.dataset.groupId || null, categoryLayerValue);
+  } else if (button.matches('[data-attach-photo-place]')) {
+    attachPhotoPlaceCandidate(button.dataset.attachPhotoPlace, button.dataset.storeId);
+  } else if (button.matches('[data-create-photo-spot]')) {
+    createPhotoFallbackSpot(button.dataset.createPhotoSpot, categoryLayerValue);
+  } else {
+    button.disabled = false;
+    button.textContent = label;
+  }
 }
 
 function renderPlaceCandidateCard(place, source, id, groupId) {
