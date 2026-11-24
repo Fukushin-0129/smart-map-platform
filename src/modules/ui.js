@@ -563,11 +563,7 @@ async function migrateLocalSaladToSupabase() {
   renderMarkers();
 }
 
-function persistSaladState() {
-  const state = { stores, layers, layerVisibility };
-  saveStores(stores);
-  saveLayers(layers);
-  saveLayerVisibility(layerVisibility);
+function syncSaladState(state) {
   if (!isSaladSupabaseConfigured()) {
     updateSaladSyncStatus('サラダマップ: オフラインデータを使用しています');
     return;
@@ -579,6 +575,14 @@ function persistSaladState() {
       updateSaladSyncStatus('サラダマップ: 端末へ保存しました。共有データへの同期を再試行します');
     }
   });
+}
+
+function persistSaladState() {
+  const state = { stores, layers, layerVisibility };
+  saveStores(stores);
+  saveLayers(layers);
+  saveLayerVisibility(layerVisibility);
+  syncSaladState(state);
 }
 
 function persistFlyerApartments(itemsToSync = flyerApartments) {
@@ -802,7 +806,7 @@ function bindEvents() {
     }
 
     stores = [store, ...stores];
-    saveStores(stores);
+    persistSaladState();
     elements.storeForm.reset();
     renderStoreList();
     renderMarkers();
@@ -1011,7 +1015,7 @@ async function importPhotoFiles(event) {
       results.push(result);
     }
 
-    saveStores(stores);
+    persistSaladState();
     savePhotoImports(photoImports);
     renderStoreList();
     renderPhotoReview();
@@ -1240,6 +1244,7 @@ function renderPlaceCandidateCard(place, source, id, groupId) {
 function trySaveStores(nextStores) {
   try {
     saveStores(nextStores);
+    syncSaladState({ stores: nextStores, layers, layerVisibility });
     return true;
   } catch (error) {
     console.error('店舗データの保存に失敗しました。', error);
@@ -1403,7 +1408,7 @@ function resolveCandidatePhoto(photoId, action) {
     stores = [createPhotoSpot(candidate.photo), ...stores];
   }
   photoImports.candidates = photoImports.candidates.filter((item) => item.photo.id !== photoId);
-  saveStores(stores);
+  persistSaladState();
   savePhotoImports(photoImports);
   renderStoreList();
   renderPhotoReview();
@@ -1440,8 +1445,7 @@ async function importKmlFiles(event) {
   if (importedStores.length) {
     layers = [...importedLayers, ...layers];
     stores = [...importedStores, ...stores];
-    saveLayers(layers);
-    saveStores(stores);
+    persistSaladState();
     renderLayerList();
     renderStoreList();
     renderMarkers();
@@ -2085,8 +2089,7 @@ function deleteStore(id) {
   closePlaceDetail();
   stores = stores.filter((store) => store.id !== id);
   layers = layers.filter((layer) => countStoresInLayer(layer.id) > 0);
-  saveStores(stores);
-  saveLayers(layers);
+  persistSaladState();
   renderLayerList();
   infoWindow?.close();
   renderStoreList();
