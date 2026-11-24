@@ -452,3 +452,21 @@ body { background: #edf3ef; }
     -webkit-tap-highlight-color: rgba(22, 163, 74, 0.18);
   }
 }
+
+
+/* Google Mapsの描画レイヤーが操作UIを覆わないように固定する */
+.map-stage { isolation: isolate; }
+.map-stage .map { z-index: 0; }
+.map-topbar,
+.map-mode-switcher,
+.search-results-panel,
+.map-actions,
+.map-status,
+.place-detail-panel,
+.flyer-map-legend,
+.flyer-registration-panel,
+.management-drawer,
+.drawer-backdrop,
+.app-toast {
+  transform: translateZ(0);
+}
