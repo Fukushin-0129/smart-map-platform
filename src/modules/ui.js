@@ -1459,10 +1459,11 @@ async function importKmlFiles(event) {
   for (const file of files) {
     try {
       const text = await file.text();
-      const layer = createKmlLayer(text, file.name, importedLayers.length);
+      const existingLayer = layers.find((layer) => layer.fileName === file.name);
+      const layer = existingLayer || createKmlLayer(text, file.name, importedLayers.length);
       const parsedStores = parseKmlStores(text, file.name, layer);
       if (parsedStores.length) {
-        importedLayers.push({ ...layer, storeCount: parsedStores.length });
+        if (!existingLayer) importedLayers.push({ ...layer, storeCount: parsedStores.length });
         importedStores.push(...parsedStores);
       } else {
         errors.push(`${file.name}: インポートできるPlacemarkが見つかりませんでした。`);
@@ -1472,9 +1473,11 @@ async function importKmlFiles(event) {
     }
   }
 
+  let importResult = { added: 0, updated: 0, photos: 0, stores: [] };
   if (importedStores.length) {
     layers = [...importedLayers, ...layers];
-    stores = [...importedStores, ...stores];
+    importResult = mergeImportedKmlStores(importedStores);
+    stores = importResult.stores;
     persistSaladState();
     renderLayerList();
     renderStoreList();
@@ -1483,10 +1486,57 @@ async function importKmlFiles(event) {
   }
 
   elements.kmlStatus.textContent = [
-    importedStores.length ? `${importedLayers.length}レイヤー、${importedStores.length}件の店舗を追加しました。` : '店舗は追加されませんでした。',
+    importedStores.length
+      ? `${importedLayers.length}レイヤーを追加、店舗${importResult.added}件を新規登録、${importResult.updated}件へ画像を追加（${importResult.photos}枚）しました。`
+      : '店舗は追加されませんでした。',
     ...errors,
   ].join(' ');
   event.target.value = '';
+}
+
+function mergeImportedKmlStores(importedStores) {
+  let added = 0;
+  let updated = 0;
+  let photos = 0;
+  const merged = [...stores];
+
+  importedStores.forEach((incoming) => {
+    const index = merged.findIndex((current) => isSameImportedKmlStore(current, incoming));
+    if (index < 0) {
+      merged.push(incoming);
+      added += 1;
+      photos += (incoming.photos || []).length;
+      return;
+    }
+
+    const current = merged[index];
+    const combinedPhotos = mergeStorePhotos(current.photos || [], incoming.photos || []);
+    const addedPhotos = combinedPhotos.length - (current.photos || []).length;
+    if (addedPhotos > 0) {
+      merged[index] = { ...current, photos: combinedPhotos, updatedAt: new Date().toISOString() };
+      updated += 1;
+      photos += addedPhotos;
+    }
+  });
+
+  return { added, updated, photos, stores: merged };
+}
+
+function isSameImportedKmlStore(current, incoming) {
+  return current.importedFrom === incoming.importedFrom
+    && current.name === incoming.name
+    && Math.abs(Number(current.lat) - Number(incoming.lat)) < 0.000001
+    && Math.abs(Number(current.lng) - Number(incoming.lng)) < 0.000001;
+}
+
+function mergeStorePhotos(currentPhotos, incomingPhotos) {
+  const known = new Set(currentPhotos.map((photo) => photo.dataUrl || photo.url).filter(Boolean));
+  return [...currentPhotos, ...incomingPhotos.filter((photo) => {
+    const source = photo.dataUrl || photo.url;
+    if (!source || known.has(source)) return false;
+    known.add(source);
+    return true;
+  })];
 }
 
 function parseKmlStores(kmlText, fileName, layer) {
@@ -1512,8 +1562,21 @@ function parseKmlStores(kmlText, fileName, layer) {
       layerId: layer.id,
       layerName: layer.name,
       layerColor: layer.color,
+      photos: extractKmlPhotos(placemark),
     };
   }).filter(Boolean);
+}
+
+function extractKmlPhotos(placemark) {
+  const description = getDirectNodeText(placemark, 'description');
+  const urls = Array.from(description.matchAll(/<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi), (match) => match[1].trim());
+  return Array.from(new Set(urls)).map((url, index) => ({
+    id: crypto.randomUUID(),
+    name: `Google My Maps画像 ${index + 1}`,
+    dataUrl: url,
+    importedAt: new Date().toISOString(),
+    importedFrom: 'Google My Maps',
+  }));
 }
 
 function createKmlLayer(kmlText, fileName, importIndex) {
