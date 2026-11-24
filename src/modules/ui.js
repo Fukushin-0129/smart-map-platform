@@ -1149,21 +1149,22 @@ async function searchNearbyFoodPlaces(lat, lng) {
   if (!placesService) return [];
 
   const location = new google.maps.LatLng(lat, lng);
-  const [nearbyResults, farmCafeResults] = await Promise.all([
-    nearbySearchPlaces({ location, radius: 1000, keyword: 'カフェ レストラン' }),
+  const [nearbyResults, farmCafeResults, farmCafePredictions] = await Promise.all([
+    nearbySearchPlaces({ location, radius: 5000, keyword: 'カフェ レストラン' }),
     textSearchPlaces({
       query: '農家カフェ',
       location,
-      radius: 5000,
+      radius: 10000,
       fields: ['place_id', 'name', 'formatted_address', 'geometry', 'types'],
     }).catch((error) => {
       console.warn('農家カフェ候補の検索に失敗しました。', error);
       return [];
     }),
+    autocompleteSearchPlaces('農家カフェ', location),
   ]);
 
   const seen = new Set();
-  return [...nearbyResults, ...farmCafeResults]
+  return [...nearbyResults, ...farmCafeResults, ...farmCafePredictions]
     .filter((place) => {
       const key = place.place_id || `${place.name}:${place.vicinity || place.formatted_address || ''}`;
       if (seen.has(key)) return false;
@@ -1182,6 +1183,37 @@ function nearbySearchPlaces(request) {
       }
       console.error('GPS付近のPlaces検索に失敗しました。', status);
       resolve([]);
+    });
+  });
+}
+
+function autocompleteSearchPlaces(input, location) {
+  if (!autocompleteService || !placesService) return Promise.resolve([]);
+  return new Promise((resolve) => {
+    autocompleteService.getPlacePredictions({
+      input,
+      location,
+      radius: 10000,
+      types: ['establishment'],
+      componentRestrictions: { country: 'jp' },
+    }, async (predictions, status) => {
+      if (status !== google.maps.places.PlacesServiceStatus.OK || !predictions?.length) {
+        resolve([]);
+        return;
+      }
+      const details = await Promise.all(predictions.slice(0, 8).map((prediction) => getPlaceDetails(prediction.place_id)));
+      resolve(details.filter(Boolean));
+    });
+  });
+}
+
+function getPlaceDetails(placeId) {
+  return new Promise((resolve) => {
+    placesService.getDetails({
+      placeId,
+      fields: ['place_id', 'name', 'formatted_address', 'geometry', 'types'],
+    }, (place, status) => {
+      resolve(status === google.maps.places.PlacesServiceStatus.OK && place?.geometry?.location ? place : null);
     });
   });
 }
