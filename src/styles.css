@@ -438,3 +438,17 @@ body { background: #edf3ef; }
     font-size: 0.8rem;
   }
 }
+
+
+/* 写真GPS候補: iPhone/Androidでもカード内の登録操作を確実に押せるようにする */
+.candidate-card button:disabled { opacity: 0.7; cursor: progress; }
+@media (max-width: 560px) {
+  .photo-place-group { scroll-margin-block: 1rem; }
+  .photo-place-group .candidate-card button {
+    width: 100%;
+    min-height: 56px;
+    font-size: 1rem;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(22, 163, 74, 0.18);
+  }
+}
