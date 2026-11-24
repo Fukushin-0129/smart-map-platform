@@ -1145,17 +1145,39 @@ function textSearchPlaces(request) {
   });
 }
 
-function searchNearbyFoodPlaces(lat, lng) {
-  if (!placesService) return Promise.resolve([]);
+async function searchNearbyFoodPlaces(lat, lng) {
+  if (!placesService) return [];
+
+  const location = new google.maps.LatLng(lat, lng);
+  const [nearbyResults, farmCafeResults] = await Promise.all([
+    nearbySearchPlaces({ location, radius: 1000, keyword: 'カフェ レストラン' }),
+    textSearchPlaces({
+      query: '農家カフェ',
+      location,
+      radius: 5000,
+      fields: ['place_id', 'name', 'formatted_address', 'geometry', 'types'],
+    }).catch((error) => {
+      console.warn('農家カフェ候補の検索に失敗しました。', error);
+      return [];
+    }),
+  ]);
+
+  const seen = new Set();
+  return [...nearbyResults, ...farmCafeResults]
+    .filter((place) => {
+      const key = place.place_id || `${place.name}:${place.vicinity || place.formatted_address || ''}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 12);
+}
+
+function nearbySearchPlaces(request) {
   return new Promise((resolve) => {
-    placesService.nearbySearch({
-      location: new google.maps.LatLng(lat, lng),
-      radius: 120,
-      keyword: 'cafe restaurant',
-      type: 'cafe',
-    }, (results, status) => {
+    placesService.nearbySearch(request, (results, status) => {
       if (status === google.maps.places.PlacesServiceStatus.OK || status === google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
-        resolve((results || []).slice(0, 8));
+        resolve(results || []);
         return;
       }
       console.error('GPS付近のPlaces検索に失敗しました。', status);
