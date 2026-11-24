@@ -1417,7 +1417,7 @@ function renderPhotoReview() {
     </article>`).join('');
   const unclassifiedItems = photoImports.unclassified.map((photo) => `
     <article class="photo-review-card">
-      <img src="${escapeHtml(photo.dataUrl)}" alt="${escapeHtml(photo.name)}" />
+      <img src="${escapeHtml(photoDisplayUrl(photo))}" alt="${escapeHtml(photo.name)}" />
       <div><strong>${escapeHtml(photo.name)}</strong><small>GPS情報なし</small></div>
     </article>`).join('');
 
@@ -2033,8 +2033,25 @@ function renderDetailRows(rows) {
   return html ? `<dl class="place-detail-list">${html}</dl>` : '<p class="empty">表示できる詳細情報がありません。</p>';
 }
 
+
+function photoDisplayUrl(photo) {
+  const source = String(photo?.dataUrl || photo?.url || '');
+  if (!source) return '';
+
+  try {
+    const url = new URL(source);
+    if (url.hostname === 'mymaps.usercontent.google.com') {
+      return `/api/mymaps-image?url=${encodeURIComponent(source)}`;
+    }
+  } catch {
+    // data URLなど、URLとして解析できない画像はそのまま表示します。
+  }
+
+  return source;
+}
+
 function renderDetailPhotos(photos = []) {
-  return photos.length ? `<div class="place-detail-photos">${photos.slice(0, 6).map((photo) => `<img src="${escapeHtml(photo.dataUrl)}" alt="${escapeHtml(photo.name || '写真')}" />`).join('')}</div>` : '';
+  return photos.length ? `<div class="place-detail-photos">${photos.slice(0, 6).map((photo) => `<img src="${escapeHtml(photoDisplayUrl(photo))}" alt="${escapeHtml(photo.name || '写真')}" />`).join('')}</div>` : '';
 }
 
 function hasDetailValue(value) {
@@ -2175,13 +2192,13 @@ function displayCategoryLayer(store) {
 
 function renderInfoWindowPhotos(photos = []) {
   return photos.length
-    ? `<div class="info-photo-grid">${photos.slice(0, 6).map((photo) => `<img src="${escapeHtml(photo.dataUrl)}" alt="${escapeHtml(photo.name)}" />`).join('')}</div>`
+    ? `<div class="info-photo-grid">${photos.slice(0, 6).map((photo) => `<img src="${escapeHtml(photoDisplayUrl(photo))}" alt="${escapeHtml(photo.name)}" />`).join('')}</div>`
     : '';
 }
 
 function renderPhotoThumbnails(photos = []) {
   return photos.length
-    ? `<div class="photo-thumbnails">${photos.slice(0, 4).map((photo) => `<img src="${escapeHtml(photo.dataUrl)}" alt="${escapeHtml(photo.name)}" title="${escapeHtml(photo.name)}" />`).join('')}${photos.length > 4 ? `<span>+${photos.length - 4}</span>` : ''}</div>`
+    ? `<div class="photo-thumbnails">${photos.slice(0, 4).map((photo) => `<img src="${escapeHtml(photoDisplayUrl(photo))}" alt="${escapeHtml(photo.name)}" title="${escapeHtml(photo.name)}" />`).join('')}${photos.length > 4 ? `<span>+${photos.length - 4}</span>` : ''}</div>`
     : '';
 }
 
