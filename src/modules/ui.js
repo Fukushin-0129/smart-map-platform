@@ -1569,7 +1569,7 @@ function parseKmlStores(kmlText, fileName, layer) {
 
 function extractKmlPhotos(placemark) {
   const description = getDirectNodeText(placemark, 'description');
-  const urls = Array.from(description.matchAll(/<img\\b[^>]*\\bsrc\\s*=\\s*["']([^"']+)["']/gi), (match) => match[1].trim());
+  const urls = Array.from(description.matchAll(/<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi), (match) => match[1].trim());
   return Array.from(new Set(urls)).map((url, index) => ({
     id: crypto.randomUUID(),
     name: `Google My Maps画像 ${index + 1}`,
