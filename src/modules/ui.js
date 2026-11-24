@@ -488,16 +488,24 @@ async function initializeSaladStorage() {
 
   if (hasMigratedSaladMap()) {
     ({ stores, layers, layerVisibility } = result.state);
-    saveStores(stores);
-    saveLayers(layers);
-    saveLayerVisibility(layerVisibility);
+    try {
+      saveStores(stores);
+      saveLayers(layers);
+      saveLayerVisibility(layerVisibility);
+    } catch (error) {
+      console.warn('端末の保存容量が不足しています。共有データを表示します。', error);
+    }
     updateSaladMigrationButton(false);
     updateSaladSyncStatus('サラダマップ: 共有データを読み込みました');
   } else {
     ({ stores, layers, layerVisibility } = mergeSaladSources(localState, result.state));
-    saveStores(stores);
-    saveLayers(layers);
-    saveLayerVisibility(layerVisibility);
+    try {
+      saveStores(stores);
+      saveLayers(layers);
+      saveLayerVisibility(layerVisibility);
+    } catch (error) {
+      console.warn('端末の保存容量が不足しています。共有データを表示します。', error);
+    }
     updateSaladMigrationButton(Boolean(localState.stores.length || localState.layers.length));
     updateSaladSyncStatus('サラダマップ: 初回同期前。端末データを確認してください');
   }
@@ -1330,31 +1338,30 @@ function renderPlaceCandidateCard(place, source, id, groupId) {
 }
 
 async function trySaveStores(nextStores) {
-  try {
-    saveStores(nextStores);
-
-    if (!isSaladSupabaseConfigured()) {
-      updateSaladSyncStatus('サラダマップ: オフラインデータを使用しています');
-      return true;
-    }
-
+  if (isSaladSupabaseConfigured()) {
     updateSaladSyncStatus('サラダマップ: 保存中...');
     const result = await saveSaladMapStateToSupabase({ stores: nextStores, layers, layerVisibility });
-    if (result.ok) {
-      updateSaladSyncStatus('サラダマップ: 同期済み');
-      return true;
+    if (!result.ok) {
+      updateSaladSyncStatus('サラダマップ: 共有データへ保存できませんでした');
+      showToast('共有データへ保存できませんでした。通信を確認してもう一度登録してください。');
+      return false;
     }
-
-    updateSaladSyncStatus('サラダマップ: 端末へ保存しました。共有データへの同期を再試行します');
-    showToast('共有データへ保存できませんでした。通信を確認してもう一度登録してください。');
-    return false;
+    try {
+      saveStores(nextStores);
+    } catch (error) {
+      console.warn('端末の保存容量が不足しています。共有データには保存しました。', error);
+    }
+    updateSaladSyncStatus('サラダマップ: 同期済み');
+    return true;
+  }
+  try {
+    saveStores(nextStores);
+    updateSaladSyncStatus('サラダマップ: オフラインデータを使用しています');
+    return true;
   } catch (error) {
     console.error('店舗データの保存に失敗しました。', error);
-    const message = error?.name === 'QuotaExceededError'
-      ? 'ブラウザの保存容量が上限に達したため登録できませんでした。写真を減らすか、不要なデータを削除してから再度お試しください。'
-      : '店舗データの保存に失敗しました。';
-    elements.photoStatus.textContent = message;
-    showToast(message);
+    elements.photoStatus.textContent = '端末の保存容量が不足しています。共有データへの接続を確認してください。';
+    showToast(elements.photoStatus.textContent);
     return false;
   }
 }
@@ -1390,7 +1397,7 @@ async function attachPhotoPlaceCandidate(groupId, storeId) {
   const group = photoPlaceCandidates.find((item) => item.id === groupId);
   if (!group) return;
   const nextStores = addPhotoToStore(stores, storeId, group.photo);
-  if (!trySaveStores(nextStores)) return;
+  if (!await trySaveStores(nextStores)) return;
   stores = nextStores;
   photoPlaceCandidates = photoPlaceCandidates.filter((item) => item.id !== groupId);
   renderStoreList();
@@ -1404,7 +1411,7 @@ async function createPhotoFallbackSpot(groupId, categoryLayerValue = '') {
   if (!group) return;
   const store = createPhotoSpot(group.photo, categoryLayerValue);
   const nextStores = [store, ...stores];
-  if (!trySaveStores(nextStores)) return;
+  if (!await trySaveStores(nextStores)) return;
   stores = nextStores;
   photoPlaceCandidates = photoPlaceCandidates.filter((item) => item.id !== groupId);
   renderStoreList();
