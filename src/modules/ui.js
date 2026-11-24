@@ -1559,6 +1559,13 @@ function renderDisplayModeMenu() {
     button.setAttribute('aria-pressed', String(selected));
   });
   document.querySelector('.map-stage')?.setAttribute('data-active-mode', displayMode);
+  if (displayMode === 'salad') {
+    elements.searchInput.placeholder = '店舗名・カテゴリ・説明で検索';
+    elements.addFabButton.setAttribute('aria-label', 'サラダマップで店舗を登録する');
+  } else if (displayMode === 'flyer') {
+    elements.searchInput.placeholder = 'マンション名・住所・担当者で検索';
+    elements.addFabButton.setAttribute('aria-label', 'チラシ配布先を登録する');
+  }
   applyMenuModeVisibility();
 }
 
