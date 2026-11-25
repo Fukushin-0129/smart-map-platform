@@ -452,3 +452,28 @@ body { background: #edf3ef; }
     -webkit-tap-highlight-color: rgba(22, 163, 74, 0.18);
   }
 }
+
+/* Compact map switcher and a focused, readable management panel. */
+.map-mode-switcher { display:block; padding:0; border-radius:18px; min-width:180px; }
+.map-mode-switcher summary { display:flex; justify-content:space-between; align-items:center; cursor:pointer; list-style:none; padding:.7rem 1rem; font-weight:800; color:#17301f; }
+.map-mode-switcher summary::-webkit-details-marker { display:none; }
+.map-mode-options { display:grid; gap:.2rem; padding:0 .4rem .4rem; }
+.map-mode-options button { text-align:left; width:100%; border-radius:12px; }
+.management-drawer { display:flex; flex-direction:column; }
+.drawer-header { flex:none; }
+.drawer-header-actions { display:flex; align-items:center; gap:.5rem; }
+.drawer-header-actions > button:first-child { white-space:nowrap; padding:.55rem .7rem; }
+.display-mode-menu { flex:none; padding:.7rem 1rem; }
+.display-mode-menu[hidden], .drawer-menu[hidden], .drawer-header-actions [hidden] { display:none !important; }
+.display-mode-menu h2, .display-mode-options { display:none; }
+.current-display-mode { margin:.15rem 0 .4rem; }
+.drawer-menu { flex:none; max-height:27vh; overflow:auto; }
+.drawer-content.controls { flex:1; min-height:0; overflow:auto; }
+.candidate-card { grid-template-columns:minmax(0,1fr); align-items:stretch; }
+.candidate-card > div { min-width:0; }
+.candidate-card p, .candidate-card strong { overflow-wrap:anywhere; }
+.candidate-card .store-actions { display:flex; flex-wrap:wrap; gap:.5rem; }
+.photo-place-group { gap:.7rem; }
+.photo-pending { margin:0; color:#9a5800; font-weight:700; }
+.photo-import .import-status { white-space:pre-line; line-height:1.6; overflow-wrap:anywhere; }
+.photo-import .import-status:not(:empty) { padding:.8rem; border-radius:12px; background:#eff9f1; color:#174a28; }
