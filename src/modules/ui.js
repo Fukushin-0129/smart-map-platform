@@ -1020,8 +1020,12 @@ async function importPhotoFiles(event) {
       results.push(result);
     }
 
-    persistSaladState();
-    savePhotoImports(photoImports);
+    try {
+      savePhotoImports(photoImports);
+    } catch (error) {
+      console.warn('未分類写真を端末へ保存できませんでした。', error);
+      stats.errors.push('未分類写真を端末に保存できませんでした。画面を閉じずに再試行してください。');
+    }
     renderStoreList();
     renderPhotoReview();
     renderPlaceCandidates();
@@ -1075,9 +1079,16 @@ async function importSinglePhoto(file, stats) {
     console.info('[写真GPS] 周辺検索開始', { fileName: file.name, lat: gps.lat, lng: gps.lng });
     const nearest = findNearestStore(gps.lat, gps.lng);
     if (nearest && nearest.distance <= NEAR_STORE_METERS) {
-      stores = addPhotoToStore(stores, nearest.store.id, photo);
+      const nextStores = addPhotoToStore(stores, nearest.store.id, photo);
+      if (!await trySaveStores(nextStores)) {
+        photoPlaceCandidates = [{ id: crypto.randomUUID(), photo, origin: { lat: gps.lat, lng: gps.lng }, existingCandidates: [nearest], placeCandidates: [] }, ...photoPlaceCandidates];
+        stats.candidates += 1;
+        stats.errors.push(`${file.name}: 保存できませんでした。候補の「写真を追加」で再試行してください。`);
+        return `${file.name}: 保存失敗。候補から再試行できます。`;
+      }
+      stores = nextStores;
       stats.attached += 1;
-      return `${file.name}: ${Math.round(nearest.distance)}m先の既存店舗「${nearest.store.name}」へ追加しました。`;
+      return `${file.name}: ${Math.round(nearest.distance)}m先の既存店舗「${nearest.store.name}」へ保存しました。`;
     }
     const existingCandidates = findNearbyStores(gps.lat, gps.lng, CANDIDATE_STORE_METERS);
     const placeCandidates = await searchNearbyFoodPlaces(gps.lat, gps.lng);
