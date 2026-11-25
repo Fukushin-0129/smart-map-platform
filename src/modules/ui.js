@@ -2343,7 +2343,7 @@ function filteredStores() {
   const modeFilteredStores = displayMode === 'flyer' ? [] : stores.filter((store) => displayMode === 'all' || isSaladRelatedStore(store));
   const layerFilteredStores = modeFilteredStores.filter((store) => store.layerId ? visibleLayerIds.has(store.layerId) : defaultStoresVisible);
   if (!keyword) return layerFilteredStores;
-  return layerFilteredStores.filter((store) => [store.name, store.category, store.description, store.layerName, store.address].some((value) => String(value || '').toLowerCase().includes(keyword)));
+  return modeFilteredStores.filter((store) => [store.name, store.category, store.description, store.layerName, store.address].some((value) => String(value || '').toLowerCase().includes(keyword)));
 }
 
 function fillCoordinates(lat, lng) {
