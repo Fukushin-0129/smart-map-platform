@@ -56,7 +56,7 @@ app.innerHTML = `
         </div>
       </div>
 
-      <section id="modeLanding" class="mode-landing" aria-labelledby="modeLandingTitle">
+      <section id="modeLanding" class="mode-landing" aria-labelledby="modeLandingTitle" hidden>
         <p class="mode-landing-eyebrow">SMART MAP PLATFORM</p>
         <h1 id="modeLandingTitle">今日は、どの地図を使いますか？</h1>
         <p class="mode-landing-description">用途を選ぶと、地図・検索・登録メニューをその仕事に合わせて切り替えます。</p>
@@ -72,10 +72,10 @@ app.innerHTML = `
         </div>
       </section>
 
-      <div id="mapModeSwitcher" class="map-mode-switcher" role="group" aria-label="地図の用途を切り替える">
-        <button type="button" data-select-mode="salad"><span aria-hidden="true">🥗</span> サラダマップ</button>
-        <button type="button" data-select-mode="flyer"><span aria-hidden="true">📬</span> チラシ配布</button>
-      </div>
+      <details id="mapModeSwitcher" class="map-mode-switcher">
+        <summary aria-label="地図を切り替える"><span id="currentMapLabel">🥗 サラダマップ</span><span aria-hidden="true"> ▾</span></summary>
+        <div class="map-mode-options"><button type="button" data-select-mode="salad">🥗 サラダマップ</button><button type="button" data-select-mode="flyer">📬 チラシ配布</button></div>
+      </details>
 
       <div class="map-topbar" aria-label="地図検索">
         <button type="button" id="menuButton" class="icon-button menu-button" aria-label="メニューを開く" aria-expanded="false">☰</button>
@@ -126,7 +126,7 @@ app.innerHTML = `
           <p class="drawer-eyebrow">Smart Map Platform</p>
           <h1 id="managementPanelTitle">レイヤー</h1>
         </div>
-        <button type="button" id="closeDrawerButton" class="icon-button" aria-label="メニューを閉じる">×</button>
+        <div class="drawer-header-actions"><button type="button" id="drawerBackButton" hidden>メニューへ</button><button type="button" id="closeDrawerButton" class="icon-button" aria-label="メニューを閉じる">×</button></div>
       </div>
 
       <section class="display-mode-menu" aria-label="表示モード">
@@ -687,6 +687,9 @@ function closeManagementDrawer() {
 function setActivePanel(panelName) {
   const target = panelTitles[panelName] ? panelName : 'layers';
   elements.managementPanelTitle.textContent = panelTitles[target];
+  document.querySelector('.display-mode-menu').hidden = target !== 'layers';
+  document.querySelector('.drawer-menu').hidden = target !== 'layers';
+  document.querySelector('#drawerBackButton').hidden = target === 'layers';
   document.querySelectorAll('[data-panel]').forEach((panel) => {
     panel.hidden = panel.dataset.panel !== target;
   });
@@ -709,6 +712,7 @@ function closeAddMenu() {
 function bindEvents() {
   elements.menuButton.addEventListener('click', () => openManagementDrawer('layers'));
   elements.closeDrawerButton.addEventListener('click', closeManagementDrawer);
+  document.querySelector('#drawerBackButton').addEventListener('click', () => setActivePanel('layers'));
   elements.drawerBackdrop.addEventListener('click', closeManagementDrawer);
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
@@ -1034,7 +1038,7 @@ async function importPhotoFiles(event) {
     }
     renderMarkers();
     const importedOrigins = photoPlaceCandidates.filter((group) => !previousCandidateIds.has(group.id)).map((group) => group.origin);
-    fitMapToVisibleData({ items: importedOrigins });
+    if (importedOrigins.length) fitMapToVisibleData({ items: importedOrigins });
   } finally {
     elements.photoStatus.textContent = formatPhotoImportStatus(stats, results);
     event.target.value = '';
@@ -1078,21 +1082,9 @@ async function importSinglePhoto(file, stats) {
 
     console.info('[写真GPS] 周辺検索開始', { fileName: file.name, lat: gps.lat, lng: gps.lng });
     const nearest = findNearestStore(gps.lat, gps.lng);
-    if (nearest && nearest.distance <= NEAR_STORE_METERS) {
-      const nextStores = addPhotoToStore(stores, nearest.store.id, photo);
-      if (!await trySaveStores(nextStores)) {
-        photoPlaceCandidates = [{ id: crypto.randomUUID(), photo, origin: { lat: gps.lat, lng: gps.lng }, existingCandidates: [nearest], placeCandidates: [] }, ...photoPlaceCandidates];
-        stats.candidates += 1;
-        stats.errors.push(`${file.name}: 保存できませんでした。候補の「写真を追加」で再試行してください。`);
-        return `${file.name}: 保存失敗。候補から再試行できます。`;
-      }
-      stores = nextStores;
-      stats.attached += 1;
-      return `${file.name}: ${Math.round(nearest.distance)}m先の既存店舗「${nearest.store.name}」へ保存しました。`;
-    }
     const existingCandidates = findNearbyStores(gps.lat, gps.lng, CANDIDATE_STORE_METERS);
     const placeCandidates = await searchNearbyFoodPlaces(gps.lat, gps.lng);
-    if (!existingCandidates.length && (!nearest || nearest.distance > CANDIDATE_STORE_METERS)) stats.created += 1;
+
     photoPlaceCandidates = [{
       id: crypto.randomUUID(),
       photo,
@@ -1101,7 +1093,7 @@ async function importSinglePhoto(file, stats) {
       placeCandidates,
     }, ...photoPlaceCandidates];
     stats.candidates += 1;
-    return `${file.name}: GPS付近の候補を表示しました。`;
+    return `${file.name}: 追加する既存店、または新規登録する店を選んでください。`;
   } catch (error) {
     const message = error instanceof Error ? error.message : '写真の読み込み中に不明なエラーが発生しました。';
     console.error('[写真GPS] 例外内容', { fileName: file.name, fileType: file.type, fileSize: file.size, error });
@@ -1111,7 +1103,7 @@ async function importSinglePhoto(file, stats) {
 }
 
 function formatPhotoImportStatus(stats, results) {
-  const summary = `${stats.attached}枚を既存店舗に追加、${stats.candidates}枚を候補表示、${stats.created}件を新規スポット、${stats.unclassified}枚を未分類にしました。`;
+  const summary = stats.candidates ? `${stats.candidates}枚の写真はまだ保存されていません。候補を選んで確認してください。` : stats.unclassified ? `${stats.unclassified}枚の写真に位置情報がありません。` : '写真の読み込みが完了しました。';
   const errorSummary = stats.errors.length ? `エラー: ${stats.errors.length}件。` : '';
   return [summary, errorSummary, ...results].filter(Boolean).join('\n');
 }
@@ -1265,17 +1257,17 @@ function renderPlaceCandidates() {
     const existing = group.existingCandidates.map((candidate) => `
       <article class="candidate-card existing">
         <div>
-          <strong>既存店舗に追加する: ${escapeHtml(candidate.store.name)}</strong>
+          <strong>既存店に写真を追加：${escapeHtml(candidate.store.name)}</strong>
           <p>${Math.round(candidate.distance)}m / ${escapeHtml(displayCategoryLayer(candidate.store))}</p>
         </div>
-        <button type="button" data-attach-photo-place="${group.id}" data-store-id="${candidate.store.id}" class="primary">写真を追加</button>
+        <button type="button" data-attach-photo-place="${group.id}" data-store-id="${candidate.store.id}" class="primary">この店に写真を追加</button>
       </article>`).join('');
     const places = group.placeCandidates.map((place, index) => renderPlaceCandidateCard(place, 'photo', `${group.id}:${index}`, group.id)).join('');
     const fallback = !group.existingCandidates.length && !group.placeCandidates.length
       ? `<article class="candidate-card"><div><p>近くのカフェ・飲食店候補が見つかりませんでした。</p>${renderCategoryLayerSelect(`fallback-layer-${escapeHtml(group.id)}`)}</div><button type="button" data-create-photo-spot="${group.id}">写真位置で新規登録</button></article>`
       : '';
     return `<section class="photo-place-group">
-      <h3>${escapeHtml(group.photo.name)} の候補</h3>
+      <h3>${escapeHtml(group.photo.name)}</h3><p class="photo-pending">未保存：追加先を選んでください</p>
       <img src="${escapeHtml(group.photo.dataUrl)}" alt="${escapeHtml(group.photo.name)}" />
       ${existing}${places}${fallback}
     </section>`;
@@ -1315,6 +1307,18 @@ async function runPlaceCandidateAction(button) {
     showToast('地図上のピンが登録候補の位置です');
     return;
   }
+  let confirmation = '';
+  if (button.matches('[data-attach-photo-place]')) {
+    const store = stores.find((item) => item.id === button.dataset.storeId);
+    confirmation = `既存店「${store?.name || '店舗'}」に写真を追加します。よろしいですか？`;
+  } else if (button.matches('[data-register-place]') && button.dataset.source === 'photo') {
+    const group = photoPlaceCandidates.find((item) => item.id === button.dataset.groupId);
+    const place = group?.placeCandidates[Number(button.dataset.registerPlace.split(':')[1])];
+    confirmation = `「${place?.name || 'この店舗'}」を写真付きの新しい店として登録します。よろしいですか？`;
+  } else if (button.matches('[data-create-photo-spot]')) {
+    confirmation = '写真の位置に新しいスポットを登録します。よろしいですか？';
+  }
+  if (confirmation && !window.confirm(confirmation)) return;
   const label = button.textContent;
   button.disabled = true;
   button.textContent = '登録中...';
@@ -1344,10 +1348,10 @@ function renderPlaceCandidateCard(place, source, id, groupId) {
       <div>
         <strong>${escapeHtml(place.name || '名称未設定')}</strong>
         <p>${escapeHtml(place.formatted_address || place.vicinity || '住所不明')}</p>
-        <small>${escapeHtml(mode)}</small>
+        <small>${escapeHtml(mode === '新規登録候補' ? '新しい店として登録' : mode + '・新規登録')}</small>
         ${renderCategoryLayerSelect(`candidate-layer-${escapeHtml(id)}`, categoryFromPlace(place))}
       </div>
-      <div class="store-actions"><button type="button" data-preview-candidate="${escapeHtml(id)}" data-source="${source}" ${groupId ? `data-group-id="${escapeHtml(groupId)}"` : ''}>地図で位置を確認</button><button type="button" data-register-place="${escapeHtml(id)}" data-source="${source}" ${groupId ? `data-group-id="${escapeHtml(groupId)}"` : ''} class="primary">登録</button></div>
+      <div class="store-actions"><button type="button" data-preview-candidate="${escapeHtml(id)}" data-source="${source}" ${groupId ? `data-group-id="${escapeHtml(groupId)}"` : ''}>地図で位置を確認</button><button type="button" data-register-place="${escapeHtml(id)}" data-source="${source}" ${groupId ? `data-group-id="${escapeHtml(groupId)}"` : ''} class="primary">新しい店として登録</button></div>
     </article>`;
 }
 
@@ -1410,7 +1414,7 @@ async function registerPlaceCandidate(id, source, groupId, categoryLayerValue = 
   renderPlaceCandidates();
   renderMarkers();
   focusStore(store.id);
-  const message = source === 'photo' ? '写真付きで店舗を登録しました。' : '店舗を登録しました。';
+  const message = source === 'photo' ? `新規登録が完了しました：「${store.name}」に写真を保存しました。` : `新規登録が完了しました：「${store.name}」。`;
   const statusElement = source === 'photo' ? elements.photoStatus : elements.placeSearchStatus;
   statusElement.textContent = message;
   showToast(message);
@@ -1427,6 +1431,10 @@ async function attachPhotoPlaceCandidate(groupId, storeId) {
   renderPlaceCandidates();
   renderMarkers();
   focusStore(storeId);
+  const store = stores.find((item) => item.id === storeId);
+  const message = `写真の追加が完了しました：既存店「${store?.name || '店舗'}」に保存しました。`;
+  elements.photoStatus.textContent = message;
+  showToast(message);
 }
 
 async function createPhotoFallbackSpot(groupId, categoryLayerValue = '') {
@@ -1441,6 +1449,9 @@ async function createPhotoFallbackSpot(groupId, categoryLayerValue = '') {
   renderPlaceCandidates();
   renderMarkers();
   focusStore(store.id);
+  const message = `新規登録が完了しました：「${store.name}」に写真を保存しました。`;
+  elements.photoStatus.textContent = message;
+  showToast(message);
 }
 
 function storeFromPlace(place, photos = [], categoryLayerValue = '') {
@@ -1861,7 +1872,7 @@ function normalizeDisplayMode(value) {
 }
 
 function selectMobileDefaultMode() {
-  if (displayMode !== 'all' || !window.matchMedia?.('(max-width: 560px)').matches) return;
+  if (displayMode !== 'all') return;
   displayMode = 'salad';
   saveDisplayMode(displayMode);
 }
@@ -1876,8 +1887,9 @@ function renderDisplayModeMenu() {
     input.checked = input.value === displayMode;
     input.closest('.display-mode-option')?.classList.toggle('active', input.checked);
   });
-  elements.modeLanding.hidden = displayMode !== 'all';
-  elements.mapModeSwitcher.hidden = displayMode === 'all';
+  elements.modeLanding.hidden = true;
+  elements.mapModeSwitcher.hidden = false;
+  document.querySelector('#currentMapLabel').textContent = displayMode === 'flyer' ? '📬 チラシ配布' : displayMode === 'all' ? '🗺 すべて表示' : '🥗 サラダマップ';
   elements.modeButtons.forEach((button) => {
     const selected = button.dataset.selectMode === displayMode;
     button.classList.toggle('active', selected);
@@ -1904,6 +1916,7 @@ function applyMenuModeVisibility() {
 
 function setDisplayMode(nextMode) {
   displayMode = normalizeDisplayMode(nextMode);
+  elements.mapModeSwitcher.open = false;
   saveDisplayMode(displayMode);
   closeAddMenu();
   renderDisplayModeMenu();
