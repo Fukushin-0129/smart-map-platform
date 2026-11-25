@@ -31,6 +31,7 @@ let allowDuplicateFlyerRegistration = false;
 let tempFlyerMarker = null;
 let keywordPlaceCandidates = [];
 let photoPlaceCandidates = [];
+let candidatePreviewMarker = null;
 let flyerRoutes = [];
 let selectedFlyerId = null;
 let recentlyAddedFlyerId = null;
@@ -1291,6 +1292,18 @@ async function runPlaceCandidateAction(button) {
   if (button.disabled) return;
   const card = button.closest('.candidate-card');
   const categoryLayerValue = { layer: card?.querySelector('[data-candidate-layer]')?.value || '', category: card?.querySelector('[data-candidate-category]')?.value || '' };
+  if (button.matches('[data-preview-candidate]')) {
+    const candidates = button.dataset.source === 'keyword' ? keywordPlaceCandidates.map((item) => item.place) : photoPlaceCandidates.find((group) => group.id === button.dataset.groupId)?.placeCandidates || [];
+    const place = button.dataset.source === 'keyword' ? keywordPlaceCandidates.find((item) => item.id === button.dataset.previewCandidate)?.place : candidates[Number(button.dataset.previewCandidate.split(':')[1])];
+    const position = normalizePlacePosition(place);
+    if (!position || !map) { showToast('候補の位置を表示できませんでした'); return; }
+    candidatePreviewMarker?.setMap(null);
+    candidatePreviewMarker = new google.maps.Marker({ map, position, title: place.name || '登録候補' });
+    map.panTo(position);
+    map.setZoom(17);
+    showToast('地図上のピンが登録候補の位置です');
+    return;
+  }
   const label = button.textContent;
   button.disabled = true;
   button.textContent = '登録中...';
@@ -1323,7 +1336,7 @@ function renderPlaceCandidateCard(place, source, id, groupId) {
         <small>${escapeHtml(mode)}</small>
         ${renderCategoryLayerSelect(`candidate-layer-${escapeHtml(id)}`, categoryFromPlace(place))}
       </div>
-      <button type="button" data-register-place="${escapeHtml(id)}" data-source="${source}" ${groupId ? `data-group-id="${escapeHtml(groupId)}"` : ''} class="primary">登録</button>
+      <div class="store-actions"><button type="button" data-preview-candidate="${escapeHtml(id)}" data-source="${source}" ${groupId ? `data-group-id="${escapeHtml(groupId)}"` : ''}>地図で位置を確認</button><button type="button" data-register-place="${escapeHtml(id)}" data-source="${source}" ${groupId ? `data-group-id="${escapeHtml(groupId)}"` : ''} class="primary">登録</button></div>
     </article>`;
 }
 
@@ -1369,8 +1382,17 @@ async function registerPlaceCandidate(id, source, groupId, categoryLayerValue = 
     return;
   }
   const nextStores = [store, ...stores];
-  if (!await trySaveStores(nextStores)) return;
+  const visibilityKey = store.layerId || 'default-stores';
+  const previousVisibility = layerVisibility[visibilityKey];
+  layerVisibility[visibilityKey] = true;
+  if (!await trySaveStores(nextStores)) {
+    if (previousVisibility === undefined) delete layerVisibility[visibilityKey]; else layerVisibility[visibilityKey] = previousVisibility;
+    return;
+  }
   stores = nextStores;
+  candidatePreviewMarker?.setMap(null);
+  candidatePreviewMarker = null;
+  renderLayerList();
   if (source === 'keyword') keywordPlaceCandidates = keywordPlaceCandidates.filter((item) => item.id !== id);
   if (group) photoPlaceCandidates = photoPlaceCandidates.filter((item) => item.id !== group.id);
   renderStoreList();
@@ -2303,10 +2325,7 @@ function visibleFlyerPlaces() {
 }
 
 function isSaladRelatedStore(store) {
-  if (!store.layerId) return true;
-  const layer = getLayerById(store.layerId);
-  const haystack = [store.layerName, store.category, store.description, layer?.name, layer?.fileName].join(' ').toLowerCase();
-  return haystack.includes('サラダ') || haystack.includes('salad');
+  return store.layerId !== FLYER_LAYER.id;
 }
 
 function closeHiddenPlaceDetail() {
