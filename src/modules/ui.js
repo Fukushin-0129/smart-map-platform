@@ -174,8 +174,8 @@ app.innerHTML = `
           <h2>店舗登録</h2>
           <form id="storeForm" class="form">
             <label>店舗名<input id="name" name="name" required placeholder="例: Green Salad Tokyo" /></label>
-            <label>登録先カテゴリ／レイヤー<select id="categoryLayer" name="categoryLayer"></select></label>
-            <label>カテゴリ補足<input id="category" name="category" placeholder="例: サラダ / カフェ / テイクアウト" /></label>
+            <label>レイヤー<select id="categoryLayer" name="categoryLayer"></select></label>
+            <label>カテゴリ<select id="category" name="category"><option value="">未分類</option><option>カフェ</option><option>飲食店</option><option>スーパーマーケット</option><option>レストランチェーン</option><option>野菜メインのカフェ</option></select></label>
             <label>説明<textarea id="description" name="description" rows="3" placeholder="おすすめメニューや営業時間など"></textarea></label>
             <div class="grid-two">
               <label>緯度<input id="lat" name="lat" type="number" step="any" required /></label>
@@ -796,7 +796,7 @@ function bindEvents() {
     const store = {
       id: crypto.randomUUID(),
       name: formData.get('name').trim(),
-      ...categoryLayerFields(formData.get('categoryLayer'), formData.get('category').trim()),
+      ...categoryLayerFields({ layer: formData.get('categoryLayer'), category: formData.get('category') }),
       description: formData.get('description').trim(),
       lat: Number(formData.get('lat')),
       lng: Number(formData.get('lng')),
@@ -1226,35 +1226,25 @@ function getPlaceDetails(placeId) {
   });
 }
 
+function layerOptions() {
+  return [{ value: '', label: 'レイヤーなし' }, ...layers.map((layer) => ({ value: layer.id, label: layer.name }))];
+}
+
 function renderCategoryLayerOptions() {
-  const options = categoryLayerOptions();
-  elements.categoryLayer.innerHTML = options.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join('');
+  elements.categoryLayer.innerHTML = layerOptions().map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join('');
 }
 
-function categoryLayerOptions() {
-  return [
-    { value: '', label: '未分類' },
-    ...layers.map((layer) => ({ value: `layer:${layer.id}`, label: `レイヤー: ${layer.name}` })),
-    { value: 'category:野菜メインのカフェ', label: 'カテゴリ: 野菜メインのカフェ' },
-    { value: 'category:スーパーマーケット', label: 'カテゴリ: スーパーマーケット' },
-    { value: 'category:レストランチェーン', label: 'カテゴリ: レストランチェーン' },
-    { value: 'category:カフェ', label: 'カテゴリ: カフェ' },
-    { value: 'category:飲食店', label: 'カテゴリ: 飲食店' },
-  ];
+function renderCategoryLayerSelect(name, category = '') {
+  const categories = ['', 'カフェ', '飲食店', 'スーパーマーケット', 'レストランチェーン', '野菜メインのカフェ'];
+  const selected = categories.includes(category) ? category : '';
+  return `<label class="candidate-layer-select">レイヤー<select data-candidate-layer name="${escapeHtml(name)}">${layerOptions().map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join('')}</select></label>
+    <label class="candidate-layer-select">カテゴリ<select data-candidate-category>${categories.map((item) => `<option value="${escapeHtml(item)}" ${item === selected ? 'selected' : ''}>${escapeHtml(item || '未分類')}</option>`).join('')}</select></label>`;
 }
 
-function renderCategoryLayerSelect(name, value = '') {
-  return `<label class="candidate-layer-select">登録先カテゴリ／レイヤー<select name="${escapeHtml(name)}">${categoryLayerOptions().map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === value ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}</select></label>`;
-}
-
-function categoryLayerFields(selectedValue, fallbackCategory = '') {
-  const selected = String(selectedValue || '');
-  if (selected.startsWith('layer:')) {
-    const layer = getLayerById(selected.slice(6));
-    if (layer) return { category: layer.name || fallbackCategory || '未分類', layerId: layer.id, layerName: layer.name, layerColor: layer.color };
-  }
-  if (selected.startsWith('category:')) return { category: selected.slice(9) || '未分類', layerId: null, layerName: '', layerColor: '#16a34a' };
-  return { category: fallbackCategory || '未分類', layerId: null, layerName: '', layerColor: '#16a34a' };
+function categoryLayerFields(selection, fallbackCategory = '') {
+  const selected = selection && typeof selection === 'object' ? selection : {};
+  const layer = selected.layer ? getLayerById(selected.layer) : null;
+  return { category: selected.category || fallbackCategory || '未分類', layerId: layer?.id || null, layerName: layer?.name || '', layerColor: layer?.color || '#16a34a' };
 }
 
 function renderPlaceCandidates() {
@@ -1300,7 +1290,7 @@ function bindPlaceCandidateActions(candidateList) {
 async function runPlaceCandidateAction(button) {
   if (button.disabled) return;
   const card = button.closest('.candidate-card');
-  const categoryLayerValue = card?.querySelector('select')?.value || '';
+  const categoryLayerValue = { layer: card?.querySelector('[data-candidate-layer]')?.value || '', category: card?.querySelector('[data-candidate-category]')?.value || '' };
   const label = button.textContent;
   button.disabled = true;
   button.textContent = '登録中...';
@@ -1331,7 +1321,7 @@ function renderPlaceCandidateCard(place, source, id, groupId) {
         <strong>${escapeHtml(place.name || '名称未設定')}</strong>
         <p>${escapeHtml(place.formatted_address || place.vicinity || '住所不明')}</p>
         <small>${escapeHtml(mode)}</small>
-        ${renderCategoryLayerSelect(`candidate-layer-${escapeHtml(id)}`)}
+        ${renderCategoryLayerSelect(`candidate-layer-${escapeHtml(id)}`, categoryFromPlace(place))}
       </div>
       <button type="button" data-register-place="${escapeHtml(id)}" data-source="${source}" ${groupId ? `data-group-id="${escapeHtml(groupId)}"` : ''} class="primary">登録</button>
     </article>`;
@@ -2266,7 +2256,7 @@ function renderSearchResults(visibleStores = filteredStores()) {
 }
 
 function displayCategoryLayer(store) {
-  return store.layerName || store.category || '未分類';
+  return [store.layerName, store.category].filter((value, index, values) => value && values.indexOf(value) === index).join(' / ') || '未分類';
 }
 
 function renderInfoWindowPhotos(photos = []) {
